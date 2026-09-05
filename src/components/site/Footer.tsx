@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { Link, type LinkProps } from "@tanstack/react-router";
 import { Facebook, Instagram, Linkedin, MapPin, Phone, Youtube } from "lucide-react";
 import { UtsLogo } from "@/components/brand/UtsLogo";
 import { COMPANY, OFFICE_LOCATIONS, SOCIAL_LINKS } from "@/lib/uts-data";
@@ -148,7 +148,7 @@ function FooterColumn({ title, children }: { title: string; children: React.Reac
   );
 }
 
-function FooterLink({ to, label }: { to: string; label: string }) {
+function FooterLink({ to, label }: { to: LinkProps["to"]; label: string }) {
   return (
     <li>
       <Link
