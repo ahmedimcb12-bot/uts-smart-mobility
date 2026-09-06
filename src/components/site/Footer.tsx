@@ -22,6 +22,7 @@ const SMART_LINKS = [
   { to: "/smart-transport", label: "Attendance" },
   { to: "/smart-transport", label: "Notifications" },
   { to: "/smart-transport", label: "Fee Management" },
+  { to: "/student/dashboard", label: "Student Portal" },
   { to: "/driver/dashboard", label: "Driver Portal" },
   { to: "/admin", label: "Admin Portal" },
 ] as const;
@@ -40,9 +41,9 @@ export function Footer() {
         <div className="lg:col-span-2">
           <UtsLogo variant="light" />
           <p className="mt-5 max-w-sm text-sm leading-relaxed text-navy-foreground/70">
-            United Transport Service provides corporate, institutional and personal
-            transportation across Pakistan — now supported by a new Smart Transport
-            Platform for digital attendance, notifications and fee management.
+            United Transport Service provides corporate, institutional and personal transportation
+            across Pakistan — now supported by a new Smart Transport Platform for digital
+            attendance, notifications and fee management.
           </p>
           <div className="mt-6 space-y-3 text-sm text-navy-foreground/80">
             <p className="flex gap-3">
@@ -53,7 +54,11 @@ export function Footer() {
               <Phone className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
               <span>
                 {COMPANY.phones.map((phone) => (
-                  <a key={phone} href={`tel:${phone.replace(/-/g, "")}`} className="mr-3 hover:text-accent">
+                  <a
+                    key={phone}
+                    href={`tel:${phone.replace(/-/g, "")}`}
+                    className="mr-3 hover:text-accent"
+                  >
                     {phone}
                   </a>
                 ))}
@@ -148,13 +153,10 @@ function FooterColumn({ title, children }: { title: string; children: React.Reac
   );
 }
 
-function FooterLink({ to, label }: { to: LinkProps["to"]; label: string }) {
+function FooterLink({ to, label }: { to: NonNullable<LinkProps["to"]>; label: string }) {
   return (
     <li>
-      <Link
-        to={to}
-        className="text-sm text-navy-foreground/70 transition-colors hover:text-accent"
-      >
+      <Link to={to} className="text-sm text-navy-foreground/70 transition-colors hover:text-accent">
         {label}
       </Link>
     </li>

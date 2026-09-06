@@ -63,25 +63,24 @@ function AboutPage() {
         <div className="grid gap-12 lg:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-5 text-base leading-relaxed text-muted-foreground">
             <p>
-              United Transport Service (UTS) provides transportation services in Pakistan
-              for corporate clients, institutions and individuals. Its publicly listed
-              services include corporate booking, tourism booking, pick &amp; drop,
-              rent a car, group transfer, personal booking and NUST pick &amp; drop.
+              United Transport Service (UTS) provides transportation services in Pakistan for
+              corporate clients, institutions and individuals. Its publicly listed services include
+              corporate booking, tourism booking, pick &amp; drop, rent a car, group transfer,
+              personal booking and NUST pick &amp; drop.
             </p>
             <p>
-              The corporate office is located at {COMPANY.address.join(", ")}, with
-              additional listed locations across Pakistan and in Saudi Arabia.
+              The corporate office is located at {COMPANY.address.join(", ")}, with additional
+              listed locations across Pakistan and in Saudi Arabia.
             </p>
             <p>
-              Alongside these services, UTS is introducing a Smart Transport Platform — a
-              new digital layer covering passenger attendance, absence notifications,
-              fee management and an operations dashboard. These are new capabilities and
-              are presented separately from existing services throughout this site.
+              Alongside these services, UTS is introducing a Smart Transport Platform — a new
+              digital layer covering passenger attendance, absence notifications, fee management and
+              an operations dashboard. These are new capabilities and are presented separately from
+              existing services throughout this site.
             </p>
             <p className="rounded-lg border border-border bg-secondary/60 p-4 text-sm">
-              Company statistics such as fleet size, passenger numbers and satisfaction
-              percentages are intentionally not shown here. Only verified information is
-              published.
+              Company statistics such as fleet size, passenger numbers and satisfaction percentages
+              are intentionally not shown here. Only verified information is published.
             </p>
           </div>
 

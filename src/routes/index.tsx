@@ -332,8 +332,8 @@ function ClosingCta() {
           Plan your transport with UTS.
         </h2>
         <p className="mx-auto mt-4 max-w-2xl text-brand-foreground/85">
-          Tell us your route, timings and passenger count. Our operations team will
-          respond with the right vehicle and arrangement.
+          Tell us your route, timings and passenger count. Our operations team will respond with the
+          right vehicle and arrangement.
         </p>
         <div className="mt-8 flex flex-wrap justify-center gap-3">
           <Button asChild size="lg" variant="secondary">

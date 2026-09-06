@@ -36,11 +36,31 @@ export const Route = createFileRoute("/smart-transport")({
 const ICONS = [ClipboardCheck, BellRing, Receipt, LayoutDashboard];
 
 const FLOW = [
-  { step: "01", title: "Driver opens the route", body: "The assigned passenger list for today loads on a mobile-first screen." },
-  { step: "02", title: "Attendance is marked", body: "Each passenger is marked present or absent at their pickup stop." },
-  { step: "03", title: "Route is ended", body: "Unmarked passengers are recorded as absent — once, never twice." },
-  { step: "04", title: "Notifications are queued", body: "Absence notices are generated and made available for delivery." },
-  { step: "05", title: "Operations reviews", body: "Administrators see attendance, absences, fees and complaints in one dashboard." },
+  {
+    step: "01",
+    title: "Driver opens the route",
+    body: "The assigned passenger list for today loads on a mobile-first screen.",
+  },
+  {
+    step: "02",
+    title: "Attendance is marked",
+    body: "Each passenger is marked present or absent at their pickup stop.",
+  },
+  {
+    step: "03",
+    title: "Route is ended",
+    body: "Unmarked passengers are recorded as absent — once, never twice.",
+  },
+  {
+    step: "04",
+    title: "Notifications are queued",
+    body: "Absence notices are generated and made available for delivery.",
+  },
+  {
+    step: "05",
+    title: "Operations reviews",
+    body: "Administrators see attendance, absences, fees and complaints in one dashboard.",
+  },
 ];
 
 function SmartTransportPage() {
@@ -87,8 +107,12 @@ function SmartTransportPage() {
               <Reveal key={item.step} delay={i * 60}>
                 <li className="h-full rounded-2xl border border-navy-foreground/15 bg-navy-foreground/5 p-6">
                   <span className="font-display text-sm font-bold text-accent">{item.step}</span>
-                  <h3 className="mt-3 text-base font-semibold text-navy-foreground">{item.title}</h3>
-                  <p className="mt-2 text-sm leading-relaxed text-navy-foreground/70">{item.body}</p>
+                  <h3 className="mt-3 text-base font-semibold text-navy-foreground">
+                    {item.title}
+                  </h3>
+                  <p className="mt-2 text-sm leading-relaxed text-navy-foreground/70">
+                    {item.body}
+                  </p>
                 </li>
               </Reveal>
             ))}
@@ -102,21 +126,20 @@ function SmartTransportPage() {
             <WifiOff className="h-6 w-6 text-primary" aria-hidden="true" />
             <h2 className="mt-4 text-xl font-semibold">Works when the signal does not</h2>
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-              The driver interface is offline-first. If connectivity drops mid-route, an
-              OFFLINE MODE banner appears, attendance can still be marked, and every
-              change is stored on the device. When the connection returns, pending records
-              sync automatically and the driver is told the attendance synced successfully.
-              Attendance is never lost because of a temporary internet failure.
+              The driver interface is offline-first. If connectivity drops mid-route, an OFFLINE
+              MODE banner appears, attendance can still be marked, and every change is stored on the
+              device. When the connection returns, pending records sync automatically and the driver
+              is told the attendance synced successfully. Attendance is never lost because of a
+              temporary internet failure.
             </p>
           </div>
           <div className="card-elevated p-8">
             <MapPinned className="h-6 w-6 text-primary" aria-hidden="true" />
             <h2 className="mt-4 text-xl font-semibold">Smart Transport Platform Preview</h2>
             <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-              Route and map views shown across this site are interface previews. UTS does
-              not currently publish live vehicle positions here — live tracking
-              integration is coming soon, and no live GPS data is displayed until a real
-              integration is connected.
+              Route and map views shown across this site are interface previews. UTS does not
+              currently publish live vehicle positions here — live tracking integration is coming
+              soon, and no live GPS data is displayed until a real integration is connected.
             </p>
           </div>
         </div>

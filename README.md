@@ -70,25 +70,25 @@ Create:
 
 /
 
- /about
+/about
 
- /services
+/services
 
- /smart-transport
+/smart-transport
 
- /fleet
+/fleet
 
- /safety
+/safety
 
- /reviews
+/reviews
 
- /faq
+/faq
 
- /contact
+/contact
 
- /request-transport
+/request-transport
 
- /login
+/login
 
 ====================================================
 
@@ -260,7 +260,10 @@ Mark them absent.
 
 Create attendance records.
 
-Trigger notification workflow.
+Trigger notification workflow:
+
+- Create ABSENCE notification for the STUDENT.
+- Absence and notifications are visible to ADMIN and SUPER_ADMIN.
 
 Show confirmation:
 
@@ -405,8 +408,6 @@ Navigation:
 Dashboard
 
 Students
-
-Parents
 
 Drivers
 
@@ -786,8 +787,6 @@ users
 
 students
 
-parents
-
 drivers
 
 vehicles
@@ -824,8 +823,6 @@ DRIVER
 
 STUDENT
 
-PARENT
-
 Use proper foreign keys.
 
 Use timestamps.
@@ -847,10 +844,6 @@ Only assigned routes/passengers.
 Student:
 
 Only own information.
-
-Parent:
-
-Only linked child information.
 
 Admin:
 
@@ -1072,11 +1065,11 @@ The final website should feel like:
 
 A premium Pakistani transportation company
 
-+
+-
 
 A modern SaaS transportation platform
 
-+
+-
 
 A trusted enterprise service
 

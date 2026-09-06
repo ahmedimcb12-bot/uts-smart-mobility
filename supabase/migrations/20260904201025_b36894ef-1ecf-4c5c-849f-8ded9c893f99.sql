@@ -1,6 +1,6 @@
 
 -- ===== Roles =====
-CREATE TYPE public.app_role AS ENUM ('SUPER_ADMIN','ADMIN','DRIVER','STUDENT','PARENT');
+CREATE TYPE public.app_role AS ENUM ('SUPER_ADMIN','ADMIN','DRIVER','STUDENT');
 
 CREATE TABLE public.profiles (
   id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -129,27 +129,9 @@ CREATE POLICY "stops read" ON public.route_stops FOR SELECT TO authenticated USI
 CREATE POLICY "stops manage" ON public.route_stops FOR ALL TO authenticated
   USING (public.is_staff(auth.uid())) WITH CHECK (public.is_staff(auth.uid()));
 
-CREATE TABLE public.parents (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  profile_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
-  full_name text NOT NULL,
-  phone text,
-  email text,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.parents TO authenticated;
-GRANT ALL ON public.parents TO service_role;
-ALTER TABLE public.parents ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "parents read" ON public.parents FOR SELECT TO authenticated
-  USING (public.is_staff(auth.uid()) OR profile_id = auth.uid());
-CREATE POLICY "parents manage" ON public.parents FOR ALL TO authenticated
-  USING (public.is_staff(auth.uid())) WITH CHECK (public.is_staff(auth.uid()));
-
 CREATE TABLE public.students (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   profile_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
-  parent_id uuid REFERENCES public.parents(id) ON DELETE SET NULL,
   full_name text NOT NULL,
   institution text,
   phone text,
@@ -186,9 +168,6 @@ CREATE OR REPLACE FUNCTION public.can_view_student(_user_id uuid, _student_id uu
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT public.is_staff(_user_id)
     OR EXISTS (SELECT 1 FROM public.students s WHERE s.id = _student_id AND s.profile_id = _user_id)
-    OR EXISTS (
-      SELECT 1 FROM public.students s JOIN public.parents p ON p.id = s.parent_id
-      WHERE s.id = _student_id AND p.profile_id = _user_id)
     OR EXISTS (
       SELECT 1 FROM public.route_students rs WHERE rs.student_id = _student_id
         AND public.drives_route(_user_id, rs.route_id));
@@ -423,7 +402,6 @@ CREATE TRIGGER drivers_updated_at BEFORE UPDATE ON public.drivers FOR EACH ROW E
 CREATE TRIGGER vehicles_updated_at BEFORE UPDATE ON public.vehicles FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 CREATE TRIGGER routes_updated_at BEFORE UPDATE ON public.routes FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 CREATE TRIGGER students_updated_at BEFORE UPDATE ON public.students FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-CREATE TRIGGER parents_updated_at BEFORE UPDATE ON public.parents FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 CREATE TRIGGER attendance_updated_at BEFORE UPDATE ON public.attendance FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 CREATE TRIGGER fees_updated_at BEFORE UPDATE ON public.fee_records FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 CREATE TRIGGER notifications_updated_at BEFORE UPDATE ON public.notifications FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();

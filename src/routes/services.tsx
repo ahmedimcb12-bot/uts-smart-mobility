@@ -58,8 +58,8 @@ function ServicesPage() {
         <div className="mt-14 rounded-2xl border border-border bg-secondary/60 p-8">
           <h2 className="text-xl font-semibold">Pricing</h2>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-            Pricing depends on route, vehicle category, duration and passenger count, and
-            is quoted by the operations team. No rates are published on this site.
+            Pricing depends on route, vehicle category, duration and passenger count, and is quoted
+            by the operations team. No rates are published on this site.
           </p>
           <Button asChild className="mt-6">
             <Link to="/request-transport">Request a quote</Link>

@@ -2,13 +2,8 @@ export const COMPANY = {
   name: "United Transport Service",
   short: "UTS",
   tagline: "Safe. Reliable. Smarter Transportation.",
-  address: [
-    "Office No. 2, Block 20-B",
-    "Kashif Blair Plaza",
-    "G-8 Markaz",
-    "Islamabad, Pakistan",
-  ],
-  phones: ["051-2251642", "051-2260727"],
+  address: ["Office No. 2, Block 20-B", "Kashif Blair Plaza", "G-8 Markaz", "Islamabad, Pakistan"],
+  phones: ["03124567891", "051-2251642", "051-2260727"],
   // Email is collected through the contact form; no public email address has been verified.
   email: "",
 };
@@ -59,14 +54,12 @@ export const SERVICES = [
   {
     slug: "personal-booking",
     title: "Personal Booking",
-    description:
-      "On-demand vehicles for personal travel, family trips and one-off journeys.",
+    description: "On-demand vehicles for personal travel, family trips and one-off journeys.",
   },
   {
     slug: "nust-pick-and-drop",
     title: "NUST Pick & Drop",
-    description:
-      "Dedicated student pick-up and drop-off arrangements serving NUST routes.",
+    description: "Dedicated student pick-up and drop-off arrangements serving NUST routes.",
   },
 ];
 
@@ -105,8 +98,7 @@ export const SMART_FEATURES = [
   {
     key: "attendance",
     title: "Passenger Attendance",
-    description:
-      "Drivers can digitally record passenger attendance during daily routes.",
+    description: "Drivers can digitally record passenger attendance during daily routes.",
   },
   {
     key: "absence",
@@ -117,8 +109,7 @@ export const SMART_FEATURES = [
   {
     key: "fees",
     title: "Fee Management",
-    description:
-      "Transport fee records can be monitored with automated overdue reminders.",
+    description: "Transport fee records can be monitored with automated overdue reminders.",
   },
   {
     key: "dashboard",
@@ -192,8 +183,8 @@ export const FAQS = [
 ];
 
 export const SOCIAL_LINKS = [
-  { name: "LinkedIn", url: null },
+  { name: "LinkedIn", url: "https://www.linkedin.com/in/ahmed-hussain-9977283ba" },
   { name: "Facebook", url: null },
-  { name: "Instagram", url: null },
-  { name: "YouTube", url: null },
+  { name: "Instagram", url: "https://www.instagram.com/ahmed5080449" },
+  { name: "YouTube", url: "https://www.youtube.com/@MrBeast" },
 ];

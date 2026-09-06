@@ -11,8 +11,20 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AboutRouteImport } from './routes/about'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as ContactRouteImport } from './routes/contact'
+import { Route as FaqRouteImport } from './routes/faq'
+import { Route as FleetRouteImport } from './routes/fleet'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as RequestTransportRouteImport } from './routes/request-transport'
+import { Route as ReviewsRouteImport } from './routes/reviews'
+import { Route as SafetyRouteImport } from './routes/safety'
 import { Route as ServicesRouteImport } from './routes/services'
 import { Route as SmartTransportRouteImport } from './routes/smart-transport'
+import { Route as TermsRouteImport } from './routes/terms'
+import { Route as DriverDashboardRouteImport } from './routes/driver.dashboard'
+import { Route as StudentDashboardRouteImport } from './routes/student.dashboard'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,6 +34,51 @@ const IndexRoute = IndexRouteImport.update({
 const AboutRoute = AboutRouteImport.update({
   id: '/about',
   path: '/about',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ContactRoute = ContactRouteImport.update({
+  id: '/contact',
+  path: '/contact',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FaqRoute = FaqRouteImport.update({
+  id: '/faq',
+  path: '/faq',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FleetRoute = FleetRouteImport.update({
+  id: '/fleet',
+  path: '/fleet',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RequestTransportRoute = RequestTransportRouteImport.update({
+  id: '/request-transport',
+  path: '/request-transport',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReviewsRoute = ReviewsRouteImport.update({
+  id: '/reviews',
+  path: '/reviews',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SafetyRoute = SafetyRouteImport.update({
+  id: '/safety',
+  path: '/safety',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ServicesRoute = ServicesRouteImport.update({
@@ -34,39 +91,151 @@ const SmartTransportRoute = SmartTransportRouteImport.update({
   path: '/smart-transport',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DriverDashboardRoute = DriverDashboardRouteImport.update({
+  id: '/driver/dashboard',
+  path: '/driver/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StudentDashboardRoute = StudentDashboardRouteImport.update({
+  id: '/student/dashboard',
+  path: '/student/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/admin': typeof AdminRoute
+  '/contact': typeof ContactRoute
+  '/faq': typeof FaqRoute
+  '/fleet': typeof FleetRoute
+  '/login': typeof LoginRoute
+  '/privacy': typeof PrivacyRoute
+  '/request-transport': typeof RequestTransportRoute
+  '/reviews': typeof ReviewsRoute
+  '/safety': typeof SafetyRoute
   '/services': typeof ServicesRoute
   '/smart-transport': typeof SmartTransportRoute
+  '/terms': typeof TermsRoute
+  '/driver/dashboard': typeof DriverDashboardRoute
+  '/student/dashboard': typeof StudentDashboardRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/admin': typeof AdminRoute
+  '/contact': typeof ContactRoute
+  '/faq': typeof FaqRoute
+  '/fleet': typeof FleetRoute
+  '/login': typeof LoginRoute
+  '/privacy': typeof PrivacyRoute
+  '/request-transport': typeof RequestTransportRoute
+  '/reviews': typeof ReviewsRoute
+  '/safety': typeof SafetyRoute
   '/services': typeof ServicesRoute
   '/smart-transport': typeof SmartTransportRoute
+  '/terms': typeof TermsRoute
+  '/driver/dashboard': typeof DriverDashboardRoute
+  '/student/dashboard': typeof StudentDashboardRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
+  '/admin': typeof AdminRoute
+  '/contact': typeof ContactRoute
+  '/faq': typeof FaqRoute
+  '/fleet': typeof FleetRoute
+  '/login': typeof LoginRoute
+  '/privacy': typeof PrivacyRoute
+  '/request-transport': typeof RequestTransportRoute
+  '/reviews': typeof ReviewsRoute
+  '/safety': typeof SafetyRoute
   '/services': typeof ServicesRoute
   '/smart-transport': typeof SmartTransportRoute
+  '/terms': typeof TermsRoute
+  '/driver/dashboard': typeof DriverDashboardRoute
+  '/student/dashboard': typeof StudentDashboardRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/about' | '/services' | '/smart-transport'
+  fullPaths:
+    | '/'
+    | '/about'
+    | '/admin'
+    | '/contact'
+    | '/faq'
+    | '/fleet'
+    | '/login'
+    | '/privacy'
+    | '/request-transport'
+    | '/reviews'
+    | '/safety'
+    | '/services'
+    | '/smart-transport'
+    | '/terms'
+    | '/driver/dashboard'
+    | '/student/dashboard'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about' | '/services' | '/smart-transport'
-  id: '__root__' | '/' | '/about' | '/services' | '/smart-transport'
+  to:
+    | '/'
+    | '/about'
+    | '/admin'
+    | '/contact'
+    | '/faq'
+    | '/fleet'
+    | '/login'
+    | '/privacy'
+    | '/request-transport'
+    | '/reviews'
+    | '/safety'
+    | '/services'
+    | '/smart-transport'
+    | '/terms'
+    | '/driver/dashboard'
+    | '/student/dashboard'
+  id:
+    | '__root__'
+    | '/'
+    | '/about'
+    | '/admin'
+    | '/contact'
+    | '/faq'
+    | '/fleet'
+    | '/login'
+    | '/privacy'
+    | '/request-transport'
+    | '/reviews'
+    | '/safety'
+    | '/services'
+    | '/smart-transport'
+    | '/terms'
+    | '/driver/dashboard'
+    | '/student/dashboard'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
+  AdminRoute: typeof AdminRoute
+  ContactRoute: typeof ContactRoute
+  FaqRoute: typeof FaqRoute
+  FleetRoute: typeof FleetRoute
+  LoginRoute: typeof LoginRoute
+  PrivacyRoute: typeof PrivacyRoute
+  RequestTransportRoute: typeof RequestTransportRoute
+  ReviewsRoute: typeof ReviewsRoute
+  SafetyRoute: typeof SafetyRoute
   ServicesRoute: typeof ServicesRoute
   SmartTransportRoute: typeof SmartTransportRoute
+  TermsRoute: typeof TermsRoute
+  DriverDashboardRoute: typeof DriverDashboardRoute
+  StudentDashboardRoute: typeof StudentDashboardRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -85,6 +254,69 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AboutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/contact': {
+      id: '/contact'
+      path: '/contact'
+      fullPath: '/contact'
+      preLoaderRoute: typeof ContactRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/faq': {
+      id: '/faq'
+      path: '/faq'
+      fullPath: '/faq'
+      preLoaderRoute: typeof FaqRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/fleet': {
+      id: '/fleet'
+      path: '/fleet'
+      fullPath: '/fleet'
+      preLoaderRoute: typeof FleetRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/request-transport': {
+      id: '/request-transport'
+      path: '/request-transport'
+      fullPath: '/request-transport'
+      preLoaderRoute: typeof RequestTransportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reviews': {
+      id: '/reviews'
+      path: '/reviews'
+      fullPath: '/reviews'
+      preLoaderRoute: typeof ReviewsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/safety': {
+      id: '/safety'
+      path: '/safety'
+      fullPath: '/safety'
+      preLoaderRoute: typeof SafetyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/services': {
       id: '/services'
       path: '/services'
@@ -99,14 +331,47 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SmartTransportRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/driver/dashboard': {
+      id: '/driver/dashboard'
+      path: '/driver/dashboard'
+      fullPath: '/driver/dashboard'
+      preLoaderRoute: typeof DriverDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/student/dashboard': {
+      id: '/student/dashboard'
+      path: '/student/dashboard'
+      fullPath: '/student/dashboard'
+      preLoaderRoute: typeof StudentDashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
+  AdminRoute: AdminRoute,
+  ContactRoute: ContactRoute,
+  FaqRoute: FaqRoute,
+  FleetRoute: FleetRoute,
+  LoginRoute: LoginRoute,
+  PrivacyRoute: PrivacyRoute,
+  RequestTransportRoute: RequestTransportRoute,
+  ReviewsRoute: ReviewsRoute,
+  SafetyRoute: SafetyRoute,
   ServicesRoute: ServicesRoute,
   SmartTransportRoute: SmartTransportRoute,
+  TermsRoute: TermsRoute,
+  DriverDashboardRoute: DriverDashboardRoute,
+  StudentDashboardRoute: StudentDashboardRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
