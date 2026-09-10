@@ -29,14 +29,13 @@ export interface NavItem {
   icon: any;
   badge?: number | string | null;
   badgeVariant?: "default" | "secondary" | "destructive" | "outline" | "warning";
-  superAdminOnly?: boolean;
   group: "OPERATIONS" | "USERS_SERVICES" | "COMMUNICATION_FLEET" | "GOVERNANCE";
 }
 
 interface AdminSidebarProps {
   activeTab: string;
   onSelectTab: (tabId: string) => void;
-  isSuperAdmin: boolean;
+  isSuperAdmin?: boolean;
   counts: {
     pendingDriverApps: number;
     openComplaints: number;
@@ -50,7 +49,6 @@ interface AdminSidebarProps {
 export function AdminSidebar({
   activeTab,
   onSelectTab,
-  isSuperAdmin,
   counts,
 }: AdminSidebarProps) {
   const NAV_ITEMS: NavItem[] = [
@@ -163,9 +161,6 @@ export function AdminSidebar({
       id: "system",
       label: "System Administration",
       icon: ShieldCheck,
-      superAdminOnly: true,
-      badge: "SUPER",
-      badgeVariant: "secondary",
       group: "GOVERNANCE",
     },
     {
@@ -192,18 +187,12 @@ export function AdminSidebar({
             <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
               Security Level
             </span>
-            <Badge
-              className={
-                isSuperAdmin
-                  ? "bg-primary text-primary-foreground text-[10px]"
-                  : "bg-secondary text-secondary-foreground text-[10px]"
-              }
-            >
-              {isSuperAdmin ? "SUPER ADMIN" : "OPERATIONS ADMIN"}
+            <Badge className="bg-primary text-primary-foreground text-[10px]">
+              OPERATIONS ADMIN
             </Badge>
           </div>
           <p className="text-xs font-semibold text-foreground mt-1 truncate">
-            {isSuperAdmin ? "Executive Desk (Full Access)" : "Transport Operations Authority"}
+            Transport Operations Authority (Full Access)
           </p>
         </div>
 
@@ -216,9 +205,6 @@ export function AdminSidebar({
                 {group.label}
               </span>
               {items.map((item) => {
-                if (item.superAdminOnly && !isSuperAdmin) {
-                  return null;
-                }
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
 

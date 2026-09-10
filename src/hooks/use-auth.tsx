@@ -3,7 +3,7 @@ import type { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 
-export type AppRole = Database["public"]["Enums"]["app_role"];
+export type AppRole = "ADMIN" | "DRIVER" | "STUDENT";
 export type DriverAppStatus = Database["public"]["Enums"]["driver_application_status"];
 
 export interface UserProfile {
@@ -56,6 +56,17 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
 }
 
+export const DEMO_UUIDS: Record<AppRole, string> = {
+  STUDENT: "00000000-0000-4000-a000-000000000001",
+  DRIVER: "00000000-0000-4000-a000-000000000002",
+  ADMIN: "00000000-0000-4000-a000-000000000003",
+};
+
+export function isValidUuid(id?: string | null): boolean {
+  if (!id) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+}
+
 const STORAGE_KEY = "uts_auth_profile_v3";
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -90,30 +101,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function fetchUserProfile(authUser: User): Promise<UserProfile | null> {
     try {
-      // 1. Fetch profile from Supabase
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", authUser.id)
-        .maybeSingle();
-
-      // 2. Fetch role from user_roles
-      const { data: roleData } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", authUser.id)
-        .maybeSingle();
-
-      // 3. Fetch driver application if exists
-      const { data: appData } = await supabase
-        .from("driver_applications")
-        .select("id, status, rejection_reason, license_no")
-        .or(`profile_id.eq.${authUser.id},applicant_email.eq.${authUser.email}`)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
       const meta = (authUser.user_metadata || {}) as Record<string, any>;
+      const userHasValidUuid = isValidUuid(authUser.id);
+
+      let profileData: any = null;
+      let roleData: any = null;
+      let appData: any = null;
+
+      if (userHasValidUuid) {
+        // 1. Fetch profile from Supabase
+        const { data: pData } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", authUser.id)
+          .maybeSingle();
+        profileData = pData;
+
+        // 2. Fetch role from user_roles
+        const { data: rData } = await supabase
+          .from("user_roles")
+          .select("role")
+          .eq("user_id", authUser.id)
+          .maybeSingle();
+        roleData = rData;
+
+        // 3. Fetch driver application if exists
+        const { data: aData } = await supabase
+          .from("driver_applications")
+          .select("id, status, rejection_reason, license_no")
+          .or(`profile_id.eq.${authUser.id},applicant_email.eq.${authUser.email}`)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        appData = aData;
+      }
+
       let userRole: AppRole = (roleData?.role as AppRole) || (meta["role"] as AppRole) || "STUDENT";
 
       let institution: string | null = null;
@@ -121,22 +143,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       let driverAppStatus: DriverAppStatus | null =
         appData?.status || (meta["driver_application_status"] as DriverAppStatus) || null;
 
-      if (userRole === "STUDENT") {
-        const { data: studentData } = await supabase
-          .from("students")
-          .select("institution")
-          .eq("profile_id", authUser.id)
-          .maybeSingle();
-        institution = studentData?.institution || meta["institution"] || null;
-      } else if (userRole === "DRIVER") {
-        const { data: driverData } = await supabase
-          .from("drivers")
-          .select("license_no, status")
-          .eq("profile_id", authUser.id)
-          .maybeSingle();
-        license_no = driverData?.license_no || appData?.license_no || meta["license_no"] || null;
-        if (driverData?.status === "SUSPENDED") {
-          driverAppStatus = "SUSPENDED";
+      if (userHasValidUuid) {
+        if (userRole === "STUDENT") {
+          const { data: studentData } = await supabase
+            .from("students")
+            .select("institution")
+            .eq("profile_id", authUser.id)
+            .maybeSingle();
+          institution = studentData?.institution || meta["institution"] || null;
+        } else if (userRole === "DRIVER") {
+          const { data: driverData } = await supabase
+            .from("drivers")
+            .select("license_no, status")
+            .eq("profile_id", authUser.id)
+            .maybeSingle();
+          license_no = driverData?.license_no || appData?.license_no || meta["license_no"] || null;
+          if (driverData?.status === "SUSPENDED") {
+            driverAppStatus = "SUSPENDED";
+          }
         }
       }
 
@@ -189,6 +213,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved) as UserProfile;
+        // Migrate legacy non-UUID demo session IDs
+        if (!isValidUuid(parsed.id) && parsed.role) {
+          parsed.id = DEMO_UUIDS[parsed.role] || DEMO_UUIDS.STUDENT;
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        }
         setProfile(parsed);
         setUser(createSyntheticUser(parsed));
       }
@@ -199,15 +228,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // 2. Get initial session from Supabase
     supabase.auth
       .getSession()
-      .then(({ data: { session: initialSession } }) => {
-        if (initialSession?.user) {
-          setSession(initialSession);
-          setUser(initialSession.user);
-          fetchUserProfile(initialSession.user).then(setProfile);
+      .then(async ({ data: { session: currentSession } }) => {
+        setSession(currentSession);
+        if (currentSession?.user) {
+          setUser(currentSession.user);
+          const p = await fetchUserProfile(currentSession.user);
+          setProfile(p);
+        } else {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved) as UserProfile;
+              if (!isValidUuid(parsed.id) && parsed.role) {
+                parsed.id = DEMO_UUIDS[parsed.role] || DEMO_UUIDS.STUDENT;
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+              }
+              setProfile(parsed);
+              setUser(createSyntheticUser(parsed));
+            } catch (err) {
+              console.warn("Error rehydrating stored demo user:", err);
+            }
+          }
         }
-        setIsLoading(false);
       })
-      .catch(() => {
+      .catch((err) => {
+        console.warn("Could not get Supabase session, using cached user:", err);
+      })
+      .finally(() => {
         setIsLoading(false);
       });
 
@@ -216,11 +263,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
       setSession(newSession);
-      const currentUser = newSession?.user ?? null;
-      if (currentUser) {
-        setUser(currentUser);
-        const p = await fetchUserProfile(currentUser);
+      if (newSession?.user) {
+        setUser(newSession.user);
+        const p = await fetchUserProfile(newSession.user);
         setProfile(p);
+      } else {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (!saved) {
+          setUser(null);
+          setProfile(null);
+        }
       }
       setIsLoading(false);
     });
@@ -239,70 +291,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
       });
 
-      if (!error && data.user) {
+      if (!error && data?.user) {
+        setUser(data.user);
+        setSession(data.session);
         const p = await fetchUserProfile(data.user);
         setProfile(p);
         setIsLoading(false);
         return { error: null, user: data.user };
       }
 
-      // 2. Check for demo shortcuts
-      const isDemoEmail =
-        email.toLowerCase().includes("student") ||
-        email.toLowerCase().includes("driver") ||
-        email.toLowerCase().includes("admin") ||
-        email.toLowerCase().includes("super");
-
-      const inferredRole: AppRole = email.toLowerCase().includes("super")
-        ? "SUPER_ADMIN"
-        : email.toLowerCase().includes("admin")
-          ? "ADMIN"
-          : email.toLowerCase().includes("driver")
-            ? "DRIVER"
-            : "STUDENT";
+      // 2. Check for demo shortcuts & hardcoded credentials
+      const cleanEmail = email.trim().toLowerCase();
+      const inferredRole: AppRole = cleanEmail.includes("admin")
+        ? "ADMIN"
+        : cleanEmail.includes("driver")
+          ? "DRIVER"
+          : "STUDENT";
 
       const inferredName =
-        inferredRole === "SUPER_ADMIN"
-          ? "Super Administrator"
-          : inferredRole === "ADMIN"
-            ? "Operations Administrator"
-            : inferredRole === "DRIVER"
-              ? "Muhammad Tariq (Driver)"
-              : "Ahmed Hussain (Student)";
+        inferredRole === "ADMIN"
+          ? "UTS Operations Administrator"
+          : inferredRole === "DRIVER"
+            ? "Muhammad Tariq (Assigned Route 01 Driver)"
+            : cleanEmail.split("@")[0] || "Ahmed Hussain";
 
-      // Attempt auto-signup for demo
-      if (isDemoEmail) {
-        try {
-          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email: email.trim(),
-            password,
-            options: {
-              data: {
-                full_name: inferredName,
-                phone: "03124567891",
-                role: inferredRole,
-                institution:
-                  inferredRole === "STUDENT"
-                    ? "National University of Sciences & Technology (NUST)"
-                    : undefined,
-              },
-            },
-          });
-
-          if (!signUpError && signUpData.user) {
-            const p = await fetchUserProfile(signUpData.user);
-            setProfile(p);
-            setIsLoading(false);
-            return { error: null, user: signUpData.user };
-          }
-        } catch (signupCatch) {
-          console.warn("Auto-signup attempt notice:", signupCatch);
-        }
-      }
+      const targetUuid = DEMO_UUIDS[inferredRole];
 
       // Fallback synthetic session
       const syntheticProfile: UserProfile = {
-        id: `demo-${inferredRole.toLowerCase()}-${Date.now()}`,
+        id: targetUuid,
         email: email.trim(),
         full_name: inferredName,
         phone: "03124567891",
@@ -329,11 +346,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           : "STUDENT";
 
       const p: UserProfile = {
-        id: `offline-${Date.now()}`,
+        id: DEMO_UUIDS[fallbackRole],
         email: email.trim(),
         full_name:
           fallbackRole === "ADMIN"
-            ? "Operations Admin"
+            ? "UTS Operations Administrator"
             : fallbackRole === "DRIVER"
               ? "Muhammad Tariq"
               : "Ahmed Hussain",
@@ -353,25 +370,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function loginAsDemo(demoRole: AppRole) {
     setIsLoading(true);
     const email =
-      demoRole === "SUPER_ADMIN"
-        ? "superadmin@uts.com.pk"
-        : demoRole === "ADMIN"
-          ? "admin@uts.com.pk"
-          : demoRole === "DRIVER"
-            ? "driver@uts.com.pk"
-            : "student@nust.edu.pk";
+      demoRole === "ADMIN"
+        ? "admin@uts.com.pk"
+        : demoRole === "DRIVER"
+          ? "driver@uts.com.pk"
+          : "student@nust.edu.pk";
 
     const name =
-      demoRole === "SUPER_ADMIN"
-        ? "Super Administrator (Executive Desk)"
-        : demoRole === "ADMIN"
-          ? "Operations Administrator"
-          : demoRole === "DRIVER"
-            ? "Muhammad Tariq (Senior Driver)"
-            : "Ahmed Hussain (NUST Student)";
+      demoRole === "ADMIN"
+        ? "UTS Operations Administrator"
+        : demoRole === "DRIVER"
+          ? "Muhammad Tariq (Assigned Driver)"
+          : "Ahmed Hussain (NUST Student)";
+
+    const targetUuid = DEMO_UUIDS[demoRole];
 
     const demoProfile: UserProfile = {
-      id: `demo-${demoRole.toLowerCase()}-id`,
+      id: targetUuid,
       email,
       full_name: name,
       phone: "03124567891",
@@ -445,7 +460,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         },
       });
 
-      const userId = authData?.user?.id || `user-${Date.now()}`;
+      const userId =
+        authData?.user?.id ||
+        (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : "00000000-0000-4000-a000-000000000001");
       const newProfile: UserProfile = {
         id: userId,
         email: email.trim(),
@@ -575,7 +594,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const role = profile?.role ?? null;
-  const isStaff = role === "ADMIN" || role === "SUPER_ADMIN";
+  const isStaff = role === "ADMIN";
   const isDriver = role === "DRIVER" && profile?.driverApplicationStatus !== "SUSPENDED";
   const isStudent = role === "STUDENT" && profile?.driverApplicationStatus !== "PENDING_APPROVAL";
   const driverApplicationStatus = profile?.driverApplicationStatus ?? null;

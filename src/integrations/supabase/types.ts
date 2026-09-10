@@ -11,11 +11,13 @@ export type Database = {
       attendance: {
         Row: {
           created_at: string;
+          driver_id: string | null;
           id: string;
           marked_at: string;
           marked_by: string | null;
           route_id: string;
           service_date: string;
+          shift_id: string;
           source: string;
           status: string;
           student_id: string;
@@ -23,11 +25,13 @@ export type Database = {
         };
         Insert: {
           created_at?: string;
+          driver_id?: string | null;
           id?: string;
           marked_at?: string;
           marked_by?: string | null;
           route_id: string;
           service_date?: string;
+          shift_id?: string;
           source?: string;
           status?: string;
           student_id: string;
@@ -35,11 +39,13 @@ export type Database = {
         };
         Update: {
           created_at?: string;
+          driver_id?: string | null;
           id?: string;
           marked_at?: string;
           marked_by?: string | null;
           route_id?: string;
           service_date?: string;
+          shift_id?: string;
           source?: string;
           status?: string;
           student_id?: string;
@@ -58,6 +64,13 @@ export type Database = {
             columns: ["student_id"];
             isOneToOne: false;
             referencedRelation: "students";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "attendance_driver_id_fkey";
+            columns: ["driver_id"];
+            isOneToOne: false;
+            referencedRelation: "drivers";
             referencedColumns: ["id"];
           },
         ];
@@ -1043,6 +1056,16 @@ export type Database = {
         Returns: boolean;
       };
       is_staff: { Args: { _user_id: string }; Returns: boolean };
+      mark_student_attendance: {
+        Args: {
+          _student_id: string;
+          _route_id: string;
+          _shift_id?: string;
+          _status?: string;
+          _service_date?: string;
+        };
+        Returns: Json;
+      };
       reactivate_driver: {
         Args: { _driver_id: string };
         Returns: Json;

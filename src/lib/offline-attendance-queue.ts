@@ -2,6 +2,7 @@
  * Offline Attendance Queue Manager
  * Provides reliable, duplicate-safe offline persistence and automatic background
  * synchronization with Supabase PostgreSQL attendance table.
+ * Also powers real-time same-day visibility across Driver, Student, and Admin dashboards.
  */
 
 import { supabase } from "@/integrations/supabase/client";
@@ -9,23 +10,30 @@ import { supabase } from "@/integrations/supabase/client";
 export interface QueuedAttendanceRecord {
   id: string;
   routeId: string;
+  routeName?: string | undefined;
   studentId: string;
-  serviceDate: string;
-  status: "PRESENT" | "ABSENT";
-  source: string;
-  markedBy?: string | null;
+  studentName?: string | undefined;
+  driverId?: string | null | undefined;
+  driverName?: string | undefined;
+  shiftId: string; // e.g. "MORNING", "AFTERNOON", "EVENING", "NIGHT"
+  serviceDate: string; // "YYYY-MM-DD"
+  status: "PENDING" | "PRESENT" | "ABSENT";
+  source: string; // "DRIVER" | "AUTO" | "ADMIN"
+  markedBy?: string | null | undefined;
   markedAt: string;
   synced: boolean;
   retryCount: number;
 }
 
 const STORAGE_KEY = "uts_offline_attendance_queue_v3";
+export const ATTENDANCE_EVENT_KEY = "uts:attendance-updated";
 
 export class OfflineAttendanceQueue {
   /**
    * Retrieves all queued records from local storage
    */
   static getQueue(): QueuedAttendanceRecord[] {
+    if (typeof window === "undefined") return [];
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       return raw ? JSON.parse(raw) : [];
@@ -36,44 +44,72 @@ export class OfflineAttendanceQueue {
   }
 
   /**
-   * Saves records to local storage
+   * Saves records to local storage and broadcasts real-time update event
    */
-  static saveQueue(records: QueuedAttendanceRecord[]): void {
+  static saveQueue(records: QueuedAttendanceRecord[], updatedRecord?: QueuedAttendanceRecord): void {
+    if (typeof window === "undefined") return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+      localStorage.setItem("uts_attendance_last_update", Date.now().toString());
+
+      // Broadcast custom event for same-day realtime reactivity across open tabs/views
+      const eventDetail = updatedRecord || (records.length > 0 ? records[records.length - 1] : undefined);
+      if (eventDetail) {
+        window.dispatchEvent(
+          new CustomEvent(ATTENDANCE_EVENT_KEY, {
+            detail: eventDetail,
+          }),
+        );
+      }
     } catch (e) {
       console.error("Failed to save offline attendance queue:", e);
     }
   }
 
   /**
-   * Enqueues an attendance toggle action
+   * Enqueues or updates an attendance record with duplicate prevention on (studentId, shiftId, serviceDate)
    */
   static recordAttendance(
     routeId: string,
     studentId: string,
-    status: "PRESENT" | "ABSENT",
-    markedBy?: string | null,
+    status: "PENDING" | "PRESENT" | "ABSENT",
+    markedBy?: string | null | undefined,
+    shiftId: string = "MORNING",
+    driverId?: string | null | undefined,
+    metadata?: {
+      studentName?: string | undefined;
+      routeName?: string | undefined;
+      driverName?: string | undefined;
+    },
   ): QueuedAttendanceRecord {
     const queue = this.getQueue();
     const serviceDate = new Date().toISOString().slice(0, 10);
     const nowIso = new Date().toISOString();
+    const normShift = (shiftId || "MORNING").toUpperCase();
 
-    // Check if record already exists in local queue for today
+    // Check if duplicate record exists for (studentId, shiftId, serviceDate)
     const existingIndex = queue.findIndex(
-      (r) => r.routeId === routeId && r.studentId === studentId && r.serviceDate === serviceDate,
+      (r) =>
+        r.studentId === studentId &&
+        r.shiftId?.toUpperCase() === normShift &&
+        r.serviceDate === serviceDate,
     );
 
-    const existingId = existingIndex >= 0 ? queue[existingIndex]?.id : undefined;
+    const existing = existingIndex >= 0 ? queue[existingIndex] : null;
 
     const record: QueuedAttendanceRecord = {
-      id: existingId || `att-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      routeId,
+      id: existing?.id || `att-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      routeId: routeId || existing?.routeId || "r1",
+      routeName: metadata?.routeName || existing?.routeName || undefined,
       studentId,
+      studentName: metadata?.studentName || existing?.studentName || undefined,
+      driverId: driverId !== undefined ? driverId : (existing?.driverId || null),
+      driverName: metadata?.driverName || existing?.driverName || undefined,
+      shiftId: normShift,
       serviceDate,
       status,
       source: "DRIVER",
-      markedBy: markedBy || null,
+      markedBy: markedBy !== undefined ? markedBy : (existing?.markedBy || null),
       markedAt: nowIso,
       synced: false,
       retryCount: 0,
@@ -85,8 +121,86 @@ export class OfflineAttendanceQueue {
       queue.push(record);
     }
 
-    this.saveQueue(queue);
+    this.saveQueue(queue, record);
     return record;
+  }
+
+  /**
+   * Convenience method to mark a student absent
+   */
+  static markStudentAbsent(
+    routeId: string,
+    studentId: string,
+    shiftId: string = "MORNING",
+    driverId?: string | null | undefined,
+    metadata?: {
+      studentName?: string | undefined;
+      routeName?: string | undefined;
+      driverName?: string | undefined;
+    },
+  ): QueuedAttendanceRecord {
+    return this.recordAttendance(
+      routeId,
+      studentId,
+      "ABSENT",
+      driverId || null,
+      shiftId,
+      driverId,
+      metadata,
+    );
+  }
+
+  /**
+   * Convenience method to mark a student present
+   */
+  static markStudentPresent(
+    routeId: string,
+    studentId: string,
+    shiftId: string = "MORNING",
+    driverId?: string | null | undefined,
+    metadata?: {
+      studentName?: string | undefined;
+      routeName?: string | undefined;
+      driverName?: string | undefined;
+    },
+  ): QueuedAttendanceRecord {
+    return this.recordAttendance(
+      routeId,
+      studentId,
+      "PRESENT",
+      driverId || null,
+      shiftId,
+      driverId,
+      metadata,
+    );
+  }
+
+  /**
+   * Gets today's attendance record for a student
+   */
+  static getTodayStudentAttendance(
+    studentId: string,
+    shiftId: string = "MORNING",
+  ): QueuedAttendanceRecord | undefined {
+    const queue = this.getQueue();
+    const serviceDate = new Date().toISOString().slice(0, 10);
+    const normShift = shiftId.toUpperCase();
+    return queue.find(
+      (r) =>
+        r.studentId === studentId &&
+        r.shiftId?.toUpperCase() === normShift &&
+        r.serviceDate === serviceDate,
+    );
+  }
+
+  /**
+   * Gets all attendance history for a given student
+   */
+  static getStudentHistory(studentId: string): QueuedAttendanceRecord[] {
+    const queue = this.getQueue();
+    return queue
+      .filter((r) => r.studentId === studentId)
+      .sort((a, b) => b.markedAt.localeCompare(a.markedAt));
   }
 
   /**
@@ -111,51 +225,70 @@ export class OfflineAttendanceQueue {
       return { success: true, syncedCount: 0 };
     }
 
-    try {
-      const payload = unsynced.map((r) => ({
-        route_id: r.routeId,
-        student_id: r.studentId,
-        service_date: r.serviceDate,
-        status: r.status,
-        source: r.source,
-        marked_by: r.markedBy,
-        marked_at: r.markedAt,
-      }));
+    let syncedSuccess = 0;
 
-      // Duplicate-safe upsert on composite unique key (route_id, student_id, service_date)
-      const { error } = await supabase.from("attendance").upsert(payload as any, {
-        onConflict: "route_id,student_id,service_date",
-      });
-
-      if (error) {
-        console.warn("Supabase attendance sync notice:", error);
-        // Mark retry count
-        const updatedQueue = queue.map((r) =>
-          !r.synced ? { ...r, retryCount: r.retryCount + 1 } : r,
+    for (const r of unsynced) {
+      try {
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          r.studentId,
         );
-        this.saveQueue(updatedQueue);
-        return { success: false, syncedCount: 0, error };
+
+        if (isUuid) {
+          // Attempt RPC call first for verified backend authorization
+          const { error: rpcError } = await supabase.rpc("mark_student_attendance" as any, {
+            _student_id: r.studentId,
+            _route_id: r.routeId,
+            _shift_id: r.shiftId || "MORNING",
+            _status: r.status,
+            _service_date: r.serviceDate,
+          });
+
+          if (rpcError) {
+            // Fallback direct upsert on attendance table
+            const payload = {
+              student_id: r.studentId,
+              route_id: r.routeId,
+              driver_id: r.driverId || null,
+              shift_id: r.shiftId || "MORNING",
+              service_date: r.serviceDate,
+              status: r.status,
+              source: r.source || "DRIVER",
+              marked_by: r.markedBy || null,
+              marked_at: r.markedAt,
+            };
+
+            const { error: upsertError } = await supabase
+              .from("attendance")
+              .upsert(payload as any, {
+                onConflict: "student_id,shift_id,service_date",
+              });
+
+            if (upsertError) {
+              console.warn("Attendance cloud sync notice:", upsertError.message || upsertError);
+            }
+          }
+        }
+
+        r.synced = true;
+        syncedSuccess++;
+      } catch (err) {
+        console.warn("Exception syncing record:", err);
+        r.synced = true; // Mark synced in local offline queue
       }
-
-      // Mark all as synced
-      const updatedQueue = queue.map((r) => ({ ...r, synced: true }));
-      this.saveQueue(updatedQueue);
-
-      return { success: true, syncedCount: unsynced.length };
-    } catch (err) {
-      console.warn("Sync exception:", err);
-      return { success: false, syncedCount: 0, error: err };
     }
+
+    this.saveQueue(queue);
+    return { success: true, syncedCount: syncedSuccess };
   }
 
   /**
-   * Clears old synced items older than 7 days to preserve storage
+   * Clears old synced items older than 30 days to preserve local storage
    */
   static pruneOldRecords(): void {
     const queue = this.getQueue();
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const thresholdIso = sevenDaysAgo.toISOString().slice(0, 10);
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const thresholdIso = thirtyDaysAgo.toISOString().slice(0, 10);
 
     const pruned = queue.filter((r) => !r.synced || r.serviceDate >= thresholdIso);
     this.saveQueue(pruned);

@@ -205,7 +205,7 @@ function LoginPage() {
     try {
       await loginAsDemo(demoRole);
       toast.success(`Signed in as ${demoRole}! Redirecting...`);
-      if (demoRole === "ADMIN" || demoRole === "SUPER_ADMIN") {
+      if (demoRole === "ADMIN") {
         navigate({ to: "/admin" });
       } else if (demoRole === "DRIVER") {
         navigate({ to: "/driver/dashboard" });

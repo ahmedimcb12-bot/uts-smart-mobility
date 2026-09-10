@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   CheckCircle2,
   XCircle,
@@ -15,6 +15,8 @@ import {
   AlertTriangle,
   RefreshCw,
   Eye,
+  Navigation,
+  Activity,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +33,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import {
+  getDriverShiftAttendance,
+  UTS_DRIVER_ONBOARD_EVENT_KEY,
+  type DriverShiftAttendanceRecord,
+} from "@/lib/admin-operations-store";
 
 export interface DriverAppItem {
   id: string;
@@ -74,6 +81,17 @@ export function DriverApplicationsTab({
 
   // Detail Modal State
   const [selectedApp, setSelectedApp] = useState<DriverAppItem | null>(null);
+
+  // Live Driver Shift Onboarding Feed
+  const [shifts, setShifts] = useState<DriverShiftAttendanceRecord[]>(() => getDriverShiftAttendance());
+
+  useEffect(() => {
+    const handleShiftEvent = () => {
+      setShifts(getDriverShiftAttendance());
+    };
+    window.addEventListener(UTS_DRIVER_ONBOARD_EVENT_KEY, handleShiftEvent);
+    return () => window.removeEventListener(UTS_DRIVER_ONBOARD_EVENT_KEY, handleShiftEvent);
+  }, []);
 
   const filtered = applications.filter((app) => {
     const matchesSearch =
@@ -131,6 +149,71 @@ export function DriverApplicationsTab({
 
   return (
     <div className="space-y-6">
+      {/* Live Driver Shifts & Manifest Onboarding Feed */}
+      <div className="card-elevated p-6 space-y-4 border-l-4 border-l-primary">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3">
+          <div className="flex items-center gap-2">
+            <Activity className="h-5 w-5 text-primary animate-pulse" />
+            <h3 className="text-base font-bold text-foreground">
+              Live Driver Shift Onboarding & Manifest Desk
+            </h3>
+            <Badge className="bg-primary/15 text-primary text-[10px] font-mono">
+              REAL-TIME FEED
+            </Badge>
+          </div>
+          <span className="text-xs text-muted-foreground font-mono">
+            {new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
+          </span>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {shifts.length === 0 ? (
+            <div className="col-span-full py-4 text-center text-xs text-muted-foreground">
+              No active driver shift check-ins recorded for today yet.
+            </div>
+          ) : (
+            shifts.map((s) => (
+              <div
+                key={s.id}
+                className="p-3.5 rounded-xl border border-border bg-card/60 hover:bg-card transition-all space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-sm text-foreground">{s.driver_name}</span>
+                  <Badge
+                    className={
+                      s.status !== "COMPLETED"
+                        ? "bg-emerald-500 text-white text-[10px]"
+                        : "bg-muted text-muted-foreground text-[10px]"
+                    }
+                  >
+                    {s.status !== "COMPLETED" ? "On Route" : "Completed"}
+                  </Badge>
+                </div>
+
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <div className="flex items-center gap-1.5 font-medium text-foreground">
+                    <Navigation className="h-3.5 w-3.5 text-primary" /> {s.route_name}
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] font-mono">
+                    <span>Bus: <strong className="text-foreground">{s.vehicle_code}</strong></span>
+                    <span>Date: <strong>{s.date}</strong></span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t border-border/50">
+                    <span className="flex items-center gap-1">
+                      <Clock className="h-3 w-3 text-emerald-600" /> Start: <strong>{s.start_time}</strong>
+                    </span>
+                    {s.end_time && (
+                      <span className="flex items-center gap-1">
+                        End: <strong>{s.end_time}</strong>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
       {/* Header controls */}
       <div className="card-elevated p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">

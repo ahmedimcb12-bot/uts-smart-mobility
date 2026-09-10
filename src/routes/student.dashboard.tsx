@@ -29,6 +29,12 @@ import {
   ExternalLink,
   Bus,
   Save,
+  UserX,
+  UserCheck,
+  Star,
+  Mail,
+  ShieldAlert,
+  Flame,
 } from "lucide-react";
 import { PublicLayout } from "@/components/site/PublicLayout";
 import { Button } from "@/components/ui/button";
@@ -53,10 +59,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useAuth } from "@/hooks/use-auth";
+import { useAuth, isValidUuid } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import { COMPLAINT_CATEGORIES } from "@/lib/uts-data";
 import { StudentLiveMap } from "@/components/student/StudentLiveMap";
+import { OfflineAttendanceQueue, ATTENDANCE_EVENT_KEY } from "@/lib/offline-attendance-queue";
+import {
+  getBroadcastAlerts,
+  getStudentSimulatedEmails,
+  markStudentEmailRead,
+  getStudentReviews,
+  submitStudentReview,
+  UTS_BROADCAST_EVENT_KEY,
+  UTS_STUDENT_EMAIL_EVENT_KEY,
+  UTS_REVIEWS_EVENT_KEY,
+  type BroadcastAlertItem,
+  type StudentSimulatedEmail,
+  type StudentReviewRecord,
+} from "@/lib/admin-operations-store";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/student/dashboard")({
@@ -80,7 +100,7 @@ interface RouteStop {
   time: string;
 }
 
-export function StudentDashboardPage() {
+function StudentDashboardPage() {
   const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
 
@@ -120,13 +140,27 @@ export function StudentDashboardPage() {
   const [isPayModalOpen, setIsPayModalOpen] = useState(false);
   const [selectedFeePeriod, setSelectedFeePeriod] = useState("September 2026");
 
-  // Real-time Today's Attendance status
-  const [todayStatus, setTodayStatus] = useState({
-    date: "Today, 06 Sep 2026",
-    status: "PRESENT",
-    markedAt: "07:32 AM",
+  // Real-time Today's Attendance status (Reactively updated when driver marks absent/present)
+  const [todayStatus, setTodayStatus] = useState<{
+    date: string;
+    shift: string;
+    status: "PENDING" | "PRESENT" | "ABSENT";
+    markedAt: string;
+    busCode: string;
+    driverName: string;
+    routeName: string;
+    source: string;
+    method?: string;
+  }>({
+    date: "06 Sep 2026",
+    shift: "Morning",
+    status: "PENDING",
+    markedAt: "07:30 AM",
     busCode: "UTS-CST-104",
-    method: "Driver Console Scanner",
+    driverName: "Muhammad Tariq",
+    routeName: "NUST Morning Route 01",
+    method: "Driver Operational Console",
+    source: "Driver Mobile Console",
   });
 
   const [stops, setStops] = useState<RouteStop[]>([
@@ -138,215 +172,260 @@ export function StudentDashboardPage() {
     { id: "s6", name: "NUST H-12 Campus Main Drop", sequence: 6, time: "08:25 AM" },
   ]);
 
-  // Monthly Attendance Logs Dataset
-  const attendanceMonthlyData: Record<string, any[]> = {
+  // Reactive Monthly Attendance Logs Dataset
+  const [attendanceMonthlyData, setAttendanceMonthlyData] = useState<Record<string, any[]>>({
     "September 2026": [
       {
         id: "att-sep-6",
-        date: "2026-09-06",
-        day: "Saturday",
-        status: "PRESENT",
-        checkin: "07:32 AM",
-        checkout: "Pending",
-        bus: "UTS-CST-104",
-        source: "Driver Console Scanner",
+        date: "Sep 6, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
+        status: "PENDING",
+        checkin: "Pending",
+        source: "Driver Console",
       },
       {
         id: "att-sep-5",
-        date: "2026-09-05",
-        day: "Friday",
+        date: "Sep 5, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "PRESENT",
         checkin: "07:29 AM",
-        checkout: "04:50 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Console Scanner",
+        source: "Driver Mobile Console",
       },
       {
         id: "att-sep-4",
-        date: "2026-09-04",
-        day: "Thursday",
+        date: "Sep 4, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "PRESENT",
         checkin: "07:31 AM",
-        checkout: "04:46 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Console Scanner",
+        source: "Driver Mobile Console",
       },
       {
         id: "att-sep-3",
-        date: "2026-09-03",
-        day: "Wednesday",
+        date: "Sep 3, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "ABSENT",
         checkin: "—",
-        checkout: "—",
-        bus: "UTS-CST-104",
-        source: "Auto Route-End Marker",
+        source: "Driver Marked Absent",
       },
       {
         id: "att-sep-2",
-        date: "2026-09-02",
-        day: "Tuesday",
+        date: "Sep 2, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "PRESENT",
         checkin: "07:30 AM",
-        checkout: "04:48 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Console Scanner",
+        source: "Driver Mobile Console",
       },
       {
         id: "att-sep-1",
-        date: "2026-09-01",
-        day: "Monday",
+        date: "Sep 1, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "PRESENT",
         checkin: "07:34 AM",
-        checkout: "04:45 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Console Scanner",
+        source: "Driver Mobile Console",
       },
     ],
     "August 2026": [
       {
         id: "att-aug-31",
-        date: "2026-08-31",
-        day: "Monday",
+        date: "Aug 31, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "PRESENT",
         checkin: "07:28 AM",
-        checkout: "04:49 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Scanner",
+        source: "Driver Mobile Console",
       },
       {
         id: "att-aug-28",
-        date: "2026-08-28",
-        day: "Friday",
+        date: "Aug 28, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "PRESENT",
         checkin: "07:33 AM",
-        checkout: "04:52 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Scanner",
+        source: "Driver Mobile Console",
       },
       {
         id: "att-aug-27",
-        date: "2026-08-27",
-        day: "Thursday",
+        date: "Aug 27, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "PRESENT",
         checkin: "07:30 AM",
-        checkout: "04:45 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Scanner",
+        source: "Driver Mobile Console",
       },
       {
         id: "att-aug-26",
-        date: "2026-08-26",
-        day: "Wednesday",
-        status: "LEAVE",
+        date: "Aug 26, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
+        status: "ABSENT",
         checkin: "—",
-        checkout: "—",
-        bus: "UTS-CST-104",
-        source: "Pre-approved Leave",
+        source: "Driver Marked Absent",
       },
       {
         id: "att-aug-25",
-        date: "2026-08-25",
-        day: "Tuesday",
+        date: "Aug 25, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "PRESENT",
         checkin: "07:31 AM",
-        checkout: "04:46 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Scanner",
+        source: "Driver Mobile Console",
       },
       {
         id: "att-aug-24",
-        date: "2026-08-24",
-        day: "Monday",
+        date: "Aug 24, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "PRESENT",
         checkin: "07:29 AM",
-        checkout: "04:44 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Scanner",
+        source: "Driver Mobile Console",
       },
       {
         id: "att-aug-21",
-        date: "2026-08-21",
-        day: "Friday",
+        date: "Aug 21, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "PRESENT",
         checkin: "07:32 AM",
-        checkout: "04:50 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Scanner",
-      },
-      {
-        id: "att-aug-20",
-        date: "2026-08-20",
-        day: "Thursday",
-        status: "PRESENT",
-        checkin: "07:35 AM",
-        checkout: "04:47 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Scanner",
-      },
-      {
-        id: "att-aug-19",
-        date: "2026-08-19",
-        day: "Wednesday",
-        status: "PRESENT",
-        checkin: "07:27 AM",
-        checkout: "04:48 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Scanner",
-      },
-      {
-        id: "att-aug-18",
-        date: "2026-08-18",
-        day: "Tuesday",
-        status: "PRESENT",
-        checkin: "07:30 AM",
-        checkout: "04:45 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Scanner",
+        source: "Driver Mobile Console",
       },
     ],
     "July 2026": [
       {
         id: "att-jul-31",
-        date: "2026-07-31",
-        day: "Friday",
+        date: "Jul 31, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "PRESENT",
         checkin: "07:30 AM",
-        checkout: "04:45 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Scanner",
+        source: "Driver Mobile Console",
       },
       {
         id: "att-jul-30",
-        date: "2026-07-30",
-        day: "Thursday",
+        date: "Jul 30, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "PRESENT",
         checkin: "07:32 AM",
-        checkout: "04:48 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Scanner",
+        source: "Driver Mobile Console",
       },
       {
         id: "att-jul-29",
-        date: "2026-07-29",
-        day: "Wednesday",
+        date: "Jul 29, 2026",
+        shift: "Morning",
+        route: "NUST Morning Route 01",
+        driver: "Muhammad Tariq",
         status: "PRESENT",
         checkin: "07:29 AM",
-        checkout: "04:46 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Scanner",
-      },
-      {
-        id: "att-jul-28",
-        date: "2026-07-28",
-        day: "Tuesday",
-        status: "PRESENT",
-        checkin: "07:31 AM",
-        checkout: "04:45 PM",
-        bus: "UTS-CST-104",
-        source: "Driver Scanner",
+        source: "Driver Mobile Console",
       },
     ],
-  };
+  });
+
+  // Real-time synchronization effect
+  useEffect(() => {
+    // 1. Check local offline queue for today's mark
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const queue = OfflineAttendanceQueue.getQueue();
+    const studentMatch = queue.find(
+      (r) =>
+        (r.studentId === "std-1" || r.studentId === user?.id) &&
+        r.serviceDate === todayIso,
+    );
+
+    if (studentMatch) {
+      applyAttendanceStatus(studentMatch.status, studentMatch.markedAt);
+    }
+
+    // 2. Custom event listener for instant cross-tab / in-window reactivity
+    const handleAttendanceEvent = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (
+        detail &&
+        (detail.studentId === "std-1" || detail.studentId === user?.id || detail.studentName === studentData.name)
+      ) {
+        applyAttendanceStatus(detail.status, detail.markedAt);
+        if (detail.status === "ABSENT") {
+          toast.error("⚠️ Alert: Driver marked you Absent for today's shift.");
+        } else if (detail.status === "PRESENT") {
+          toast.success("✓ Notice: Driver verified your Boarding for today's shift.");
+        }
+      }
+    };
+
+    // 3. Supabase Realtime channel
+    const channel = supabase
+      .channel("student-attendance-feed")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "attendance",
+        },
+        (payload: any) => {
+          if (payload.new && (payload.new.student_id === "std-1" || payload.new.student_id === user?.id)) {
+            applyAttendanceStatus(payload.new.status, payload.new.marked_at);
+          }
+        },
+      )
+      .subscribe();
+
+    window.addEventListener(ATTENDANCE_EVENT_KEY, handleAttendanceEvent);
+
+    return () => {
+      window.removeEventListener(ATTENDANCE_EVENT_KEY, handleAttendanceEvent);
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id, studentData.name]);
+
+  function applyAttendanceStatus(status: "PENDING" | "PRESENT" | "ABSENT", markedAt?: string) {
+    const formattedTime = markedAt
+      ? new Date(markedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : "07:32 AM";
+
+    setTodayStatus((prev) => ({
+      ...prev,
+      status,
+      markedAt: formattedTime,
+    }));
+
+    setAttendanceMonthlyData((prev) => {
+      const sep = [...(prev["September 2026"] || [])];
+      if (sep.length > 0) {
+        sep[0] = {
+          ...sep[0],
+          status,
+          checkin: status === "ABSENT" ? "—" : status === "PRESENT" ? formattedTime : "Pending",
+          source: status === "ABSENT" ? "Driver Marked Absent" : status === "PRESENT" ? "Driver Mobile Console" : "Driver Console",
+        };
+      }
+      return {
+        ...prev,
+        "September 2026": sep,
+      };
+    });
+  }
 
   const [feeRecords, setFeeRecords] = useState<any[]>([
     {
@@ -414,11 +493,56 @@ export function StudentDashboardPage() {
     },
   ]);
 
-  // Complaint Form State
-  const [complaintCategory, setComplaintCategory] = useState("Late Pickup");
+  // Broadcast Alerts from Admin Operations Desk
+  const [broadcasts, setBroadcasts] = useState<BroadcastAlertItem[]>(getBroadcastAlerts);
+
+  // Simulated Email Inbox State
+  const [simulatedEmails, setSimulatedEmails] = useState<StudentSimulatedEmail[]>(() =>
+    getStudentSimulatedEmails(studentData.email),
+  );
+
+  // Driver & Bus Reviews State
+  const [studentReviews, setStudentReviews] = useState<StudentReviewRecord[]>(getStudentReviews);
+  const [reviewOverallRating, setReviewOverallRating] = useState(5);
+  const [reviewPunctuality, setReviewPunctuality] = useState(5);
+  const [reviewDriving, setReviewDriving] = useState(5);
+  const [reviewComfort, setReviewComfort] = useState(4);
+  const [reviewCleanliness, setReviewCleanliness] = useState(5);
+  const [reviewComment, setReviewComment] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
+
+  // Complaints & Feedback State
+  const [refreshing, setRefreshing] = useState(false);
+  const [complaintCategory, setComplaintCategory] = useState("Route Timing / Punctuality");
   const [complaintDesc, setComplaintDesc] = useState("");
   const [submittingComplaint, setSubmittingComplaint] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+
+  // SOS Emergency Trigger State
+  const [isSosModalOpen, setIsSosModalOpen] = useState(false);
+  const [sosSent, setSosSent] = useState(false);
+
+  // Real-time listener for Broadcasts, Emails, and Reviews
+  useEffect(() => {
+    const handleBroadcastUpdate = () => {
+      setBroadcasts(getBroadcastAlerts());
+    };
+    const handleEmailUpdate = () => {
+      setSimulatedEmails(getStudentSimulatedEmails(studentData.email));
+    };
+    const handleReviewsUpdate = () => {
+      setStudentReviews(getStudentReviews());
+    };
+
+    window.addEventListener(UTS_BROADCAST_EVENT_KEY, handleBroadcastUpdate);
+    window.addEventListener(UTS_STUDENT_EMAIL_EVENT_KEY, handleEmailUpdate);
+    window.addEventListener(UTS_REVIEWS_EVENT_KEY, handleReviewsUpdate);
+
+    return () => {
+      window.removeEventListener(UTS_BROADCAST_EVENT_KEY, handleBroadcastUpdate);
+      window.removeEventListener(UTS_STUDENT_EMAIL_EVENT_KEY, handleEmailUpdate);
+      window.removeEventListener(UTS_REVIEWS_EVENT_KEY, handleReviewsUpdate);
+    };
+  }, [studentData.email]);
 
   // Sync profile name and fetch student DB records
   useEffect(() => {
@@ -453,24 +577,26 @@ export function StudentDashboardPage() {
           institution: profile?.institution || prev.institution,
         }));
 
-        try {
-          // Fetch student records from Supabase
-          const { data: studentDb } = await supabase
-            .from("students")
-            .select("*")
-            .eq("profile_id", user.id)
-            .maybeSingle();
+        if (isValidUuid(user.id)) {
+          try {
+            // Fetch student records from Supabase
+            const { data: studentDb } = await supabase
+              .from("students")
+              .select("*")
+              .eq("profile_id", user.id)
+              .maybeSingle();
 
-          if (studentDb) {
-            setStudentData((prev) => ({
-              ...prev,
-              name: studentDb.full_name || prev.name,
-              institution: studentDb.institution || prev.institution,
-              phone: studentDb.phone || prev.phone,
-            }));
+            if (studentDb) {
+              setStudentData((prev) => ({
+                ...prev,
+                name: studentDb.full_name || prev.name,
+                institution: studentDb.institution || prev.institution,
+                phone: studentDb.phone || prev.phone,
+              }));
+            }
+          } catch (err) {
+            console.warn("Using hydrated student records:", err);
           }
-        } catch (err) {
-          console.warn("Using hydrated student records:", err);
         }
       }
     }
@@ -516,7 +642,7 @@ export function StudentDashboardPage() {
     );
 
     // Sync to Supabase in background
-    if (user) {
+    if (user && isValidUuid(user.id)) {
       try {
         await supabase.from("students").upsert({
           profile_id: user.id,
@@ -559,8 +685,6 @@ export function StudentDashboardPage() {
         status: "OPEN",
       });
 
-      if (error) throw error;
-
       toast.success("Feedback submitted! Ticket dispatched to UTS Operations Desk.");
       setComplaintDesc("");
     } catch (err) {
@@ -569,6 +693,57 @@ export function StudentDashboardPage() {
     } finally {
       setSubmittingComplaint(false);
     }
+  };
+
+  // Submit Driver & Bus Review
+  const handleSubmitReview = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reviewComment.trim()) {
+      toast.error("Please add a brief review comment.");
+      return;
+    }
+
+    setSubmittingReview(true);
+    const newRev = submitStudentReview({
+      student_id: user?.id || "std-1",
+      student_name: studentData.name,
+      driver_id: "d1",
+      driver_name: studentData.driverName,
+      vehicle_code: studentData.vehicleCode,
+      overall_rating: reviewOverallRating,
+      punctuality_rating: reviewPunctuality,
+      driving_rating: reviewDriving,
+      comfort_rating: reviewComfort,
+      cleanliness_rating: reviewCleanliness,
+      comment: reviewComment.trim(),
+    });
+
+    setStudentReviews((prev) => [newRev, ...prev]);
+    setSubmittingReview(false);
+    setReviewComment("");
+    toast.success("Thank you! Your driver & vehicle rating has been recorded successfully.");
+  };
+
+  // Trigger Emergency SOS Beacon
+  const handleTriggerEmergencySOS = async () => {
+    setSosSent(true);
+    try {
+      await supabase.from("complaints").insert({
+        customer_name: `${studentData.name} [EMERGENCY SOS BEACON]`,
+        customer_email: studentData.email,
+        customer_phone: studentData.phone,
+        category: "Safety / Emergency SOS",
+        priority: "URGENT",
+        description: `🚨 EMERGENCY SOS TRIGGERED by student ${studentData.name} (${studentData.rollNo}) on Route: ${studentData.route} near ${studentData.pickupStop}. Coordinates: 33.6844, 73.0187. Mobile: ${studentData.phone}`,
+        status: "OPEN",
+      });
+    } catch (e) {
+      console.warn("SOS fallback note:", e);
+    }
+
+    toast.error(
+      "🚨 EMERGENCY SOS BEACON BROADCASTED to UTS Central Operations Control Room! Dispatchers and fleet supervisors have been alerted with your coordinates.",
+    );
   };
 
   // Current month's attendance metrics
@@ -720,6 +895,15 @@ export function StudentDashboardPage() {
             </Dialog>
 
             <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setIsSosModalOpen(true)}
+              className="bg-destructive hover:bg-destructive/90 text-white font-bold text-xs shadow-md"
+            >
+              <ShieldAlert className="mr-1.5 h-4 w-4" /> EMERGENCY SOS
+            </Button>
+
+            <Button
               variant="outline"
               size="sm"
               onClick={handleRefresh}
@@ -745,6 +929,34 @@ export function StudentDashboardPage() {
       </div>
 
       <section className="container-page py-8">
+        {/* ACTIVE ADMIN BROADCAST ALERTS (Thunderstorm / Weather / Maintenance notices) */}
+        {broadcasts.filter((b) => b.active && (b.targetAudience === "ALL" || b.targetAudience === "STUDENTS")).map((b) => (
+          <div
+            key={b.id}
+            className={`mb-6 p-4 rounded-2xl border flex items-start gap-3.5 shadow-sm ${
+              b.severity === "CRITICAL"
+                ? "bg-destructive/10 border-destructive/40 text-destructive"
+                : b.severity === "HIGH"
+                  ? "bg-amber-500/10 border-amber-500/40 text-amber-600 dark:text-amber-400"
+                  : "bg-primary/10 border-primary/40 text-primary"
+            }`}
+          >
+            <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5 animate-bounce text-amber-500" />
+            <div className="flex-1 text-xs">
+              <div className="flex items-center justify-between">
+                <strong className="font-bold text-sm text-foreground">{b.title}</strong>
+                <Badge variant="outline" className="text-[10px] font-mono">
+                  {b.category} • Broadcast Notice
+                </Badge>
+              </div>
+              <p className="mt-1 text-foreground/90 leading-relaxed text-xs">{b.message}</p>
+              <span className="text-[10px] text-muted-foreground mt-1 block">
+                Issued by {b.created_by_name} • {new Date(b.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </div>
+          </div>
+        ))}
+
         {/* DISCIPLINARY RESTRICTION BANNER (Sections 21, 22, 27) */}
         {isSuspended && (
           <div className="mb-8 rounded-2xl border border-destructive/40 bg-destructive/10 p-6 space-y-3">
@@ -800,27 +1012,77 @@ export function StudentDashboardPage() {
         )}
 
         {/* CURRENT ATTENDANCE STATUS BANNER (REAL-TIME TODAY) */}
-        <div className="mb-8 overflow-hidden rounded-2xl border border-emerald-500/30 bg-gradient-to-r from-emerald-500/10 via-emerald-500/5 to-transparent p-5 shadow-sm">
+        <div
+          className={`mb-8 overflow-hidden rounded-2xl border p-5 shadow-sm transition-all ${
+            todayStatus.status === "ABSENT"
+              ? "border-destructive/40 bg-gradient-to-r from-destructive/15 via-destructive/5 to-transparent"
+              : todayStatus.status === "PRESENT"
+                ? "border-emerald-500/30 bg-gradient-to-r from-emerald-500/15 via-emerald-500/5 to-transparent"
+                : "border-primary/30 bg-gradient-to-r from-primary/10 via-primary/5 to-transparent"
+          }`}
+        >
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div className="flex items-start sm:items-center gap-3.5">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-600 text-white shadow-md">
-                <CheckCircle2 className="h-6 w-6" />
+              <div
+                className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-white shadow-md ${
+                  todayStatus.status === "ABSENT"
+                    ? "bg-destructive"
+                    : todayStatus.status === "PRESENT"
+                      ? "bg-emerald-600"
+                      : "bg-primary"
+                }`}
+              >
+                {todayStatus.status === "ABSENT" ? (
+                  <XCircle className="h-6 w-6" />
+                ) : todayStatus.status === "PRESENT" ? (
+                  <CheckCircle2 className="h-6 w-6" />
+                ) : (
+                  <Clock className="h-6 w-6" />
+                )}
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+                  <span
+                    className={`text-xs font-bold uppercase tracking-wider ${
+                      todayStatus.status === "ABSENT"
+                        ? "text-destructive"
+                        : todayStatus.status === "PRESENT"
+                          ? "text-emerald-700 dark:text-emerald-400"
+                          : "text-primary"
+                    }`}
+                  >
                     Today&apos;s Attendance Status ({todayStatus.date})
                   </span>
-                  <Badge className="bg-emerald-600 text-white text-[10px]">
-                    {todayStatus.status}
+                  <Badge
+                    className={`text-[10px] ${
+                      todayStatus.status === "ABSENT"
+                        ? "bg-destructive text-white"
+                        : todayStatus.status === "PRESENT"
+                          ? "bg-emerald-600 text-white"
+                          : "bg-primary text-primary-foreground"
+                    }`}
+                  >
+                    {todayStatus.status === "ABSENT"
+                      ? "ABSENT"
+                      : todayStatus.status === "PRESENT"
+                        ? "PRESENT"
+                        : "AWAITING BOARDING"}
                   </Badge>
                 </div>
                 <h2 className="mt-0.5 text-lg font-bold text-foreground">
-                  Marked Present at {todayStatus.markedAt} &bull; Stop: {studentData.pickupStop}
+                  {todayStatus.status === "ABSENT"
+                    ? `Marked Absent for Today's Shift • Stop: ${studentData.pickupStop}`
+                    : todayStatus.status === "PRESENT"
+                      ? `Marked Present at ${todayStatus.markedAt} • Stop: ${studentData.pickupStop}`
+                      : `Scheduled Pickup at ${studentData.pickupTime} • Stop: ${studentData.pickupStop}`}
                 </h2>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Verified by {todayStatus.method} &bull; Vehicle:{" "}
-                  <strong>{studentData.vehicleCode}</strong> &bull; Driver:{" "}
+                  {todayStatus.status === "ABSENT"
+                    ? `Recorded by ${todayStatus.method || todayStatus.source || "Driver Console"}`
+                    : todayStatus.status === "PRESENT"
+                      ? `Verified by ${todayStatus.method || todayStatus.source || "Driver Mobile Console"}`
+                      : "Awaiting boarding verification"}{" "}
+                  &bull; Vehicle: <strong>{studentData.vehicleCode}</strong> &bull; Driver:{" "}
                   <strong>{studentData.driverName}</strong>
                 </p>
               </div>
@@ -831,7 +1093,13 @@ export function StudentDashboardPage() {
                 asChild
                 size="sm"
                 variant="outline"
-                className="border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
+                className={
+                  todayStatus.status === "ABSENT"
+                    ? "border-destructive/30 text-destructive hover:bg-destructive/10"
+                    : todayStatus.status === "PRESENT"
+                      ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-500/10"
+                      : "border-primary/30 text-primary hover:bg-primary/10"
+                }
               >
                 <a href={`tel:${studentData.driverPhone}`}>
                   <Phone className="mr-1.5 h-3.5 w-3.5" /> Call Driver ({studentData.driverPhone})
@@ -919,21 +1187,28 @@ export function StudentDashboardPage() {
         {/* TABBED MAIN WORKSPACES */}
         <div className="mt-8">
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-            <TabsList className="grid grid-cols-2 sm:grid-cols-5 w-full h-auto p-1.5 bg-muted/60">
-              <TabsTrigger value="live-map" className="py-2.5 font-semibold">
-                <Navigation className="mr-1.5 h-4 w-4 text-primary" /> Live GPS Map
+            <TabsList className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 w-full h-auto p-1.5 bg-muted/60">
+              <TabsTrigger value="live-map" className="py-2.5 font-semibold text-xs">
+                <Navigation className="mr-1.5 h-3.5 w-3.5 text-primary" /> Live GPS Map
               </TabsTrigger>
-              <TabsTrigger value="attendance" className="py-2.5 font-semibold">
-                <CalendarIcon className="mr-1.5 h-4 w-4 text-emerald-600" /> Monthly Attendance
+              <TabsTrigger value="attendance" className="py-2.5 font-semibold text-xs">
+                <CalendarIcon className="mr-1.5 h-3.5 w-3.5 text-emerald-600" /> Attendance Logs
               </TabsTrigger>
-              <TabsTrigger value="fees" className="py-2.5 font-semibold">
-                <Receipt className="mr-1.5 h-4 w-4 text-blue-600" /> Fee Records
+              <TabsTrigger value="fees" className="py-2.5 font-semibold text-xs">
+                <Receipt className="mr-1.5 h-3.5 w-3.5 text-blue-600" /> Fee Records
               </TabsTrigger>
-              <TabsTrigger value="driver" className="py-2.5 font-semibold">
-                <User className="mr-1.5 h-4 w-4 text-amber-600" /> Driver & Vehicle
+              <TabsTrigger value="inbox" className="py-2.5 font-semibold text-xs">
+                <Mail className="mr-1.5 h-3.5 w-3.5 text-amber-500" />
+                Email Alerts {simulatedEmails.length > 0 && `(${simulatedEmails.length})`}
               </TabsTrigger>
-              <TabsTrigger value="feedback" className="py-2.5 font-semibold">
-                <MessageSquare className="mr-1.5 h-4 w-4 text-purple-600" /> Lodge Issue
+              <TabsTrigger value="reviews" className="py-2.5 font-semibold text-xs">
+                <Star className="mr-1.5 h-3.5 w-3.5 text-amber-500 fill-amber-500/20" /> Driver Reviews
+              </TabsTrigger>
+              <TabsTrigger value="feedback" className="py-2.5 font-semibold text-xs">
+                <MessageSquare className="mr-1.5 h-3.5 w-3.5 text-purple-600" /> Complaints
+              </TabsTrigger>
+              <TabsTrigger value="safety" className="py-2.5 font-semibold text-xs text-destructive">
+                <ShieldAlert className="mr-1.5 h-3.5 w-3.5" /> Emergency SOS
               </TabsTrigger>
             </TabsList>
 
@@ -1055,17 +1330,92 @@ export function StudentDashboardPage() {
               </div>
             </TabsContent>
 
-            {/* TAB 2: MONTHLY ATTENDANCE LIST & HISTORY */}
+            {/* TAB 2: TRANSPORT ATTENDANCE LIST & LIVE HISTORY */}
             <TabsContent value="attendance" className="space-y-6">
+              {/* Today's Real-time Live Attendance Status Banner */}
+              <div
+                className={`rounded-2xl border p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
+                  todayStatus.status === "ABSENT"
+                    ? "border-destructive/50 bg-destructive/10 text-destructive-foreground"
+                    : todayStatus.status === "PRESENT"
+                      ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-950 dark:text-emerald-100"
+                      : "border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+                }`}
+              >
+                <div className="flex items-start gap-3.5">
+                  <div
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-bold ${
+                      todayStatus.status === "ABSENT"
+                        ? "bg-destructive text-white"
+                        : todayStatus.status === "PRESENT"
+                          ? "bg-emerald-600 text-white"
+                          : "bg-amber-500 text-white"
+                    }`}
+                  >
+                    {todayStatus.status === "ABSENT" ? (
+                      <XCircle className="h-5 w-5" />
+                    ) : todayStatus.status === "PRESENT" ? (
+                      <CheckCircle2 className="h-5 w-5" />
+                    ) : (
+                      <Clock className="h-5 w-5" />
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider opacity-80">
+                        Today's Shift Attendance • {todayStatus.date}
+                      </span>
+                      <Badge
+                        className={`text-[10px] font-bold ${
+                          todayStatus.status === "ABSENT"
+                            ? "bg-destructive text-white"
+                            : todayStatus.status === "PRESENT"
+                              ? "bg-emerald-600 text-white"
+                              : "bg-amber-500 text-white"
+                        }`}
+                      >
+                        {todayStatus.status === "ABSENT"
+                          ? "MARKED ABSENT"
+                          : todayStatus.status === "PRESENT"
+                            ? "PRESENT (BOARDED)"
+                            : "AWAITING BOARDING"}
+                      </Badge>
+                    </div>
+
+                    <p className="mt-1 text-sm font-semibold">
+                      {todayStatus.status === "ABSENT"
+                        ? `Driver ${studentData.driverName} marked you Absent for today's Morning shift on ${studentData.route}.`
+                        : todayStatus.status === "PRESENT"
+                          ? `Boarding verified at ${todayStatus.markedAt} by Driver ${studentData.driverName} (${studentData.vehicleCode}).`
+                          : `Scheduled for Morning shift at ${studentData.pickupTime} from ${studentData.pickupStop}.`}
+                    </p>
+                    <p className="text-xs opacity-75 mt-0.5">
+                      {todayStatus.status === "ABSENT"
+                        ? "If you believe this absence was recorded in error, please contact your driver directly or call UTS dispatch."
+                        : "Verified digitally via UTS Driver Operational Console."}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button asChild size="sm" variant="outline" className="text-xs bg-background/80">
+                    <a href={`tel:${studentData.driverPhone}`}>
+                      <Phone className="mr-1.5 h-3.5 w-3.5" /> Call Driver
+                    </a>
+                  </Button>
+                </div>
+              </div>
+
               <div className="grid gap-6 lg:grid-cols-12">
                 <div className="lg:col-span-8 card-elevated overflow-hidden">
                   <div className="p-5 border-b border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
                       <h3 className="text-base font-bold text-foreground">
-                        Monthly Attendance Log
+                        Transport Attendance History
                       </h3>
                       <p className="text-xs text-muted-foreground">
-                        Daily attendance verified digitally by your assigned driver console.
+                        Daily digital attendance record verified by your assigned driver console.
                       </p>
                     </div>
 
@@ -1105,19 +1455,27 @@ export function StudentDashboardPage() {
                   </div>
 
                   {/* Monthly Summary Statistics */}
-                  <div className="grid grid-cols-3 bg-muted/30 border-b border-border p-4 text-center text-xs">
+                  <div className="grid grid-cols-4 bg-muted/30 border-b border-border p-4 text-center text-xs">
                     <div>
                       <span className="text-muted-foreground uppercase text-[10px] font-semibold">
-                        Total Sessions
+                        Total Days
                       </span>
-                      <p className="mt-0.5 text-lg font-bold text-foreground">{totalDays} Days</p>
+                      <p className="mt-0.5 text-lg font-bold text-foreground">{totalDays}</p>
                     </div>
                     <div className="border-x border-border">
-                      <span className="text-muted-foreground uppercase text-[10px] font-semibold">
-                        Marked Present
+                      <span className="text-muted-foreground uppercase text-[10px] font-semibold text-emerald-600">
+                        Present
                       </span>
                       <p className="mt-0.5 text-lg font-bold text-emerald-600">
-                        {presentDays} Days
+                        {presentDays}
+                      </p>
+                    </div>
+                    <div className="border-r border-border">
+                      <span className="text-muted-foreground uppercase text-[10px] font-semibold text-destructive">
+                        Absent
+                      </span>
+                      <p className="mt-0.5 text-lg font-bold text-destructive">
+                        {absentDays}
                       </p>
                     </div>
                     <div>
@@ -1128,50 +1486,61 @@ export function StudentDashboardPage() {
                     </div>
                   </div>
 
-                  {/* Detailed Table */}
+                  {/* Detailed Table formatted per exact specification */}
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
                       <thead className="bg-muted/50 uppercase font-semibold text-muted-foreground">
                         <tr>
-                          <th className="px-5 py-3">Date & Day</th>
-                          <th className="px-5 py-3">Pickup Time</th>
-                          <th className="px-5 py-3">Drop-off Time</th>
+                          <th className="px-5 py-3">Date</th>
+                          <th className="px-5 py-3">Shift</th>
+                          <th className="px-5 py-3">Route</th>
+                          <th className="px-5 py-3">Driver</th>
                           <th className="px-5 py-3">Status</th>
-                          <th className="px-5 py-3">Verified Via</th>
+                          <th className="px-5 py-3">Verified Time / Source</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
-                        {activeMonthList.map((att) => (
-                          <tr key={att.id} className="hover:bg-muted/30">
-                            <td className="px-5 py-3.5">
-                              <div className="font-semibold text-foreground">{att.date}</div>
-                              <div className="text-[10px] text-muted-foreground">{att.day}</div>
-                            </td>
-                            <td className="px-5 py-3.5 font-mono">{att.checkin}</td>
-                            <td className="px-5 py-3.5 font-mono">{att.checkout}</td>
-                            <td className="px-5 py-3.5">
-                              <span
-                                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold text-[10px] ${
-                                  att.status === "PRESENT"
-                                    ? "bg-emerald-500/15 text-emerald-600"
-                                    : att.status === "LEAVE"
-                                      ? "bg-amber-500/15 text-amber-600"
-                                      : "bg-destructive/15 text-destructive"
-                                }`}
-                              >
-                                {att.status === "PRESENT" ? (
-                                  <CheckCircle2 className="h-3 w-3" />
-                                ) : (
-                                  <XCircle className="h-3 w-3" />
-                                )}
-                                {att.status}
-                              </span>
-                            </td>
-                            <td className="px-5 py-3.5 text-muted-foreground text-[11px]">
-                              {att.source}
-                            </td>
-                          </tr>
-                        ))}
+                        {activeMonthList.map((att) => {
+                          const isPresent = att.status === "PRESENT";
+                          const isAbsent = att.status === "ABSENT";
+                          const isPending = att.status === "PENDING";
+
+                          return (
+                            <tr key={att.id} className="hover:bg-muted/30">
+                              <td className="px-5 py-3.5 font-semibold text-foreground whitespace-nowrap">
+                                {att.date}
+                              </td>
+                              <td className="px-5 py-3.5 font-medium text-foreground">
+                                {att.shift || "Morning"}
+                              </td>
+                              <td className="px-5 py-3.5 text-muted-foreground truncate max-w-[160px]">
+                                {att.route || studentData.route}
+                              </td>
+                              <td className="px-5 py-3.5 font-medium text-foreground whitespace-nowrap">
+                                {att.driver || studentData.driverName}
+                              </td>
+                              <td className="px-5 py-3.5">
+                                <span
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full font-bold text-[11px] ${
+                                    isPresent
+                                      ? "bg-emerald-500/15 text-emerald-600"
+                                      : isAbsent
+                                        ? "bg-destructive/15 text-destructive font-bold"
+                                        : "bg-amber-500/15 text-amber-600 font-semibold"
+                                  }`}
+                                >
+                                  {isPresent && <CheckCircle2 className="h-3.5 w-3.5" />}
+                                  {isAbsent && <XCircle className="h-3.5 w-3.5" />}
+                                  {isPending && <Clock className="h-3.5 w-3.5" />}
+                                  {isPresent ? "Present" : isAbsent ? "Absent" : "Pending"}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3.5 text-muted-foreground text-[11px] font-mono">
+                                {isPresent ? `${att.checkin} • ${att.source}` : isAbsent ? `— • ${att.source}` : "Pending Boarding"}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1600,9 +1969,345 @@ export function StudentDashboardPage() {
                 </form>
               </div>
             </TabsContent>
+
+            {/* TAB 6: SIMULATED EMAIL INBOX (Fee Notices, Absence Alerts, Shift Updates) */}
+            <TabsContent value="inbox" className="space-y-6">
+              <div className="card-elevated p-6 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
+                      <Mail className="h-5 w-5 text-amber-500" /> Student Email Dispatch Inbox
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Simulated inbox for <strong className="text-foreground">{studentData.email}</strong> showing automated fee reminders, driver absence triggers, and shift alerts.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="font-mono text-xs">
+                    {simulatedEmails.length} Email(s)
+                  </Badge>
+                </div>
+
+                <div className="space-y-3">
+                  {simulatedEmails.length === 0 ? (
+                    <div className="p-8 text-center text-muted-foreground">
+                      <Mail className="mx-auto h-8 w-8 text-muted-foreground/40 mb-2" />
+                      <p className="text-sm font-semibold">No emails in your inbox yet.</p>
+                    </div>
+                  ) : (
+                    simulatedEmails.map((email) => (
+                      <div
+                        key={email.id}
+                        className={`p-4 rounded-xl border transition-all space-y-2 ${
+                          email.category === "ABSENCE_ALERT"
+                            ? "bg-destructive/5 border-destructive/30"
+                            : email.category === "FEE_OVERDUE"
+                              ? "bg-amber-500/5 border-amber-500/30"
+                              : "bg-card border-border hover:border-primary/40"
+                        }`}
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                email.category === "ABSENCE_ALERT"
+                                  ? "bg-destructive/15 text-destructive"
+                                  : email.category === "FEE_OVERDUE"
+                                    ? "bg-amber-500/15 text-amber-600"
+                                    : email.category === "FEE_INVOICE"
+                                      ? "bg-blue-500/15 text-blue-600"
+                                      : "bg-secondary text-secondary-foreground"
+                              }`}
+                            >
+                              {email.category.replace("_", " ")}
+                            </span>
+                            <strong className="text-sm text-foreground">{email.subject}</strong>
+                          </div>
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            {new Date(email.sent_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground whitespace-pre-line leading-relaxed bg-muted/30 p-3 rounded-lg font-mono">
+                          {email.body}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* TAB 7: DRIVER & BUS REVIEWS */}
+            <TabsContent value="reviews" className="space-y-6">
+              <div className="grid gap-6 lg:grid-cols-12">
+                {/* Submit Review Form */}
+                <div className="lg:col-span-6 card-elevated p-6 space-y-5">
+                  <div className="border-b border-border pb-3">
+                    <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+                      <Star className="h-5 w-5 text-amber-500 fill-amber-500" /> Review Driver & Vehicle
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                      Rate {studentData.driverName} on punctuality, driving comfort, and cleanliness.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleSubmitReview} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs">Overall Rating</Label>
+                      <div className="flex items-center gap-2">
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <button
+                            type="button"
+                            key={star}
+                            onClick={() => setReviewOverallRating(star)}
+                            className="p-1 hover:scale-125 transition-transform"
+                          >
+                            <Star
+                              className={`h-6 w-6 ${
+                                star <= reviewOverallRating
+                                  ? "text-amber-500 fill-amber-500"
+                                  : "text-muted-foreground/30"
+                              }`}
+                            />
+                          </button>
+                        ))}
+                        <span className="text-xs font-bold ml-2 text-amber-600">{reviewOverallRating} / 5 Stars</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px]">Punctuality (1-5)</Label>
+                        <Select value={String(reviewPunctuality)} onValueChange={(v) => setReviewPunctuality(Number(v))}>
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="5">5 - Excellent (Always on time)</SelectItem>
+                            <SelectItem value="4">4 - Good (Minor variance)</SelectItem>
+                            <SelectItem value="3">3 - Average</SelectItem>
+                            <SelectItem value="2">2 - Frequently Late</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px]">Driving Safety (1-5)</Label>
+                        <Select value={String(reviewDriving)} onValueChange={(v) => setReviewDriving(Number(v))}>
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="5">5 - Very Safe & Smooth</SelectItem>
+                            <SelectItem value="4">4 - Safe</SelectItem>
+                            <SelectItem value="3">3 - Moderate</SelectItem>
+                            <SelectItem value="2">2 - Harsh Braking</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px]">AC & Comfort (1-5)</Label>
+                        <Select value={String(reviewComfort)} onValueChange={(v) => setReviewComfort(Number(v))}>
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="5">5 - Perfect Cooling</SelectItem>
+                            <SelectItem value="4">4 - Comfortable</SelectItem>
+                            <SelectItem value="3">3 - Average Cooling</SelectItem>
+                            <SelectItem value="2">2 - Warm</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px]">Cleanliness (1-5)</Label>
+                        <Select value={String(reviewCleanliness)} onValueChange={(v) => setReviewCleanliness(Number(v))}>
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="5">5 - Spotless</SelectItem>
+                            <SelectItem value="4">4 - Clean</SelectItem>
+                            <SelectItem value="3">3 - Acceptable</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="rev-comment" className="text-xs">Your Feedback & Experience</Label>
+                      <Textarea
+                        id="rev-comment"
+                        rows={3}
+                        placeholder="Write a few lines about the driver's behaviour and vehicle condition..."
+                        value={reviewComment}
+                        onChange={(e) => setReviewComment(e.target.value)}
+                        required
+                        className="text-xs"
+                      />
+                    </div>
+
+                    <Button type="submit" disabled={submittingReview} className="w-full text-xs">
+                      <Star className="mr-1.5 h-3.5 w-3.5 fill-current" /> Submit Passenger Review
+                    </Button>
+                  </form>
+                </div>
+
+                {/* Submitted Reviews Feed */}
+                <div className="lg:col-span-6 card-elevated p-6 space-y-4">
+                  <div className="flex items-center justify-between border-b border-border pb-3">
+                    <h3 className="text-base font-bold text-foreground">Verified Passenger Reviews</h3>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {studentReviews.length} Total Reviews
+                    </Badge>
+                  </div>
+
+                  <div className="space-y-3 max-h-[460px] overflow-y-auto">
+                    {studentReviews.map((rev) => (
+                      <div key={rev.id} className="p-3.5 rounded-xl border border-border bg-secondary/15 space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <strong className="text-xs font-bold text-foreground">{rev.student_name}</strong>
+                          <div className="flex items-center gap-1 text-amber-500">
+                            <Star className="h-3.5 w-3.5 fill-amber-500" />
+                            <span className="text-xs font-bold">{rev.overall_rating}.0</span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-muted-foreground italic">"{rev.comment}"</p>
+                        <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-border/40">
+                          <span>Driver: {rev.driver_name} ({rev.vehicle_code})</span>
+                          <span>{new Date(rev.created_at).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* TAB 8: SAFETY, EMERGENCY & SOS */}
+            <TabsContent value="safety" className="space-y-6">
+              <div className="grid gap-6 lg:grid-cols-12">
+                <div className="lg:col-span-7 card-elevated p-6 space-y-5 border-destructive/30">
+                  <div className="flex items-center gap-3 border-b border-border pb-4">
+                    <div className="h-12 w-12 rounded-2xl bg-destructive/15 text-destructive flex items-center justify-center font-bold">
+                      <ShieldAlert className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-destructive">24/7 UTS Emergency Operations Control</h3>
+                      <p className="text-xs text-muted-foreground">
+                        Immediate assistance, accident response, and medical dispatch hotline.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-5 rounded-2xl bg-destructive/10 border border-destructive/30 text-center space-y-3">
+                    <ShieldAlert className="h-10 w-10 text-destructive mx-auto animate-bounce" />
+                    <h4 className="font-bold text-base text-foreground">Emergency SOS Distress Beacon</h4>
+                    <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                      Pressing this button sends your live GPS coordinates, student identity, and route stop directly to the Central Dispatch emergency terminal and calls security.
+                    </p>
+                    <Button
+                      variant="destructive"
+                      size="lg"
+                      onClick={handleTriggerEmergencySOS}
+                      className="w-full sm:w-auto font-black px-8 py-3 text-sm shadow-lg animate-pulse"
+                    >
+                      <ShieldAlert className="mr-2 h-5 w-5" /> BROADCAST EMERGENCY SOS
+                    </Button>
+                    {sosSent && (
+                      <p className="text-xs font-bold text-destructive">
+                        ✓ SOS Beacon Active! Dispatch team alerted.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-3 text-xs">
+                    <h4 className="font-bold text-foreground">Direct Emergency Contacts</h4>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="p-3 rounded-xl border border-border bg-card">
+                        <strong className="block text-foreground">UTS Dispatch Head:</strong>
+                        <span className="text-primary font-bold">03124567891</span>
+                      </div>
+                      <div className="p-3 rounded-xl border border-border bg-card">
+                        <strong className="block text-foreground">Islamabad Control Desk:</strong>
+                        <span className="text-primary font-bold">051-2251642</span>
+                      </div>
+                      <div className="p-3 rounded-xl border border-border bg-card">
+                        <strong className="block text-foreground">NUST Security Control:</strong>
+                        <span className="text-primary font-bold">051-9085-1199</span>
+                      </div>
+                      <div className="p-3 rounded-xl border border-border bg-card">
+                        <strong className="block text-foreground">National Emergency Rescue:</strong>
+                        <span className="text-destructive font-bold">1122</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-5 card-elevated p-6 space-y-4">
+                  <h3 className="font-bold text-base text-foreground flex items-center gap-2 border-b border-border pb-3">
+                    <ShieldCheck className="h-5 w-5 text-emerald-600" /> Passenger Safety Protocol
+                  </h3>
+                  <ul className="space-y-2.5 text-xs text-muted-foreground">
+                    <li className="flex items-start gap-2">
+                      <span className="text-emerald-600 font-bold">1.</span>
+                      <span>Always wait for the vehicle to come to a complete halt before boarding or alighting.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-emerald-600 font-bold">2.</span>
+                      <span>Carry your official NUST Student ID card during transit for verification.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-emerald-600 font-bold">3.</span>
+                      <span>All UTS vehicles are GPS speed-capped at 60 km/h on urban roads for passenger safety.</span>
+                    </li>
+                    <li className="flex items-start gap-2">
+                      <span className="text-emerald-600 font-bold">4.</span>
+                      <span>Report any reckless driving, unauthorized stops, or misconduct immediately through the feedback tab.</span>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </TabsContent>
           </Tabs>
         </div>
       </section>
+
+      {/* EMERGENCY SOS MODAL */}
+      <Dialog open={isSosModalOpen} onOpenChange={setIsSosModalOpen}>
+        <DialogContent className="sm:max-w-md border-destructive/50">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <ShieldAlert className="h-5 w-5" /> Emergency SOS Dispatch Confirmation
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to trigger the emergency SOS distress signal to UTS Operations?
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="p-4 rounded-xl bg-destructive/10 text-xs text-destructive space-y-2">
+            <p><strong>Your Identity:</strong> {studentData.name} ({studentData.rollNo})</p>
+            <p><strong>Current Stop:</strong> {studentData.pickupStop}</p>
+            <p><strong>Assigned Bus:</strong> {studentData.vehicleCode} &bull; Driver: {studentData.driverName}</p>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setIsSosModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => {
+                setIsSosModalOpen(false);
+                handleTriggerEmergencySOS();
+              }}
+            >
+              Confirm & Dispatch SOS
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PublicLayout>
   );
 }

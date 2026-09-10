@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import {
   Car,
   Users,
@@ -20,11 +21,30 @@ import {
   ShieldAlert,
   Radio,
   UserCheck,
+  Star,
+  BellRing,
+  Sparkles,
+  Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { BusItem, DriverItem, RouteItem } from "@/lib/admin-operations-store";
+import {
+  getBroadcastAlerts,
+  deleteBroadcastAlert,
+  getDriverShiftAttendance,
+  getStudentReviews,
+  UTS_BROADCAST_EVENT_KEY,
+  UTS_DRIVER_ONBOARD_EVENT_KEY,
+  UTS_REVIEWS_EVENT_KEY,
+  type BusItem,
+  type DriverItem,
+  type RouteItem,
+  type BroadcastAlertItem,
+  type DriverShiftAttendanceRecord,
+  type StudentReviewRecord,
+} from "@/lib/admin-operations-store";
 import type { StudentTransportRecord, ScheduleItem } from "@/lib/transport-eligibility";
+import { toast } from "sonner";
 
 interface AdminDashboardOverviewProps {
   buses: BusItem[];
@@ -59,6 +79,30 @@ export function AdminDashboardOverview({
   onOpenCreateSchedule,
   onTriggerFeeScan,
 }: AdminDashboardOverviewProps) {
+  // Live reactive store feeds
+  const [broadcasts, setBroadcasts] = useState<BroadcastAlertItem[]>(() => getBroadcastAlerts());
+  const [driverOnboardings, setDriverOnboardings] = useState<DriverShiftAttendanceRecord[]>(() =>
+    getDriverShiftAttendance(),
+  );
+  const [studentReviews, setStudentReviews] = useState<StudentReviewRecord[]>(() =>
+    getStudentReviews(),
+  );
+
+  useEffect(() => {
+    const handleBroadcastUpdate = () => setBroadcasts(getBroadcastAlerts());
+    const handleDriverOnboardUpdate = () => setDriverOnboardings(getDriverShiftAttendance());
+    const handleReviewsUpdate = () => setStudentReviews(getStudentReviews());
+
+    window.addEventListener(UTS_BROADCAST_EVENT_KEY, handleBroadcastUpdate);
+    window.addEventListener(UTS_DRIVER_ONBOARD_EVENT_KEY, handleDriverOnboardUpdate);
+    window.addEventListener(UTS_REVIEWS_EVENT_KEY, handleReviewsUpdate);
+
+    return () => {
+      window.removeEventListener(UTS_BROADCAST_EVENT_KEY, handleBroadcastUpdate);
+      window.removeEventListener(UTS_DRIVER_ONBOARD_EVENT_KEY, handleDriverOnboardUpdate);
+      window.removeEventListener(UTS_REVIEWS_EVENT_KEY, handleReviewsUpdate);
+    };
+  }, []);
   // Calculated Metrics
   const totalBuses = buses.length;
   const activeBuses = buses.filter((b) => b.status === "ACTIVE").length;
@@ -91,6 +135,58 @@ export function AdminDashboardOverview({
 
   return (
     <div className="space-y-8">
+      {/* 0. LIVE BROADCAST EMERGENCY DISPATCH FEED */}
+      {broadcasts.length > 0 && (
+        <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-destructive font-bold text-sm">
+              <BellRing className="h-5 w-5 animate-bounce" />
+              <span>Active Broadcast Notifications ({broadcasts.length})</span>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => onNavigateTab("notifications")}
+              className="text-xs h-7 border-destructive/40 text-destructive hover:bg-destructive/10"
+            >
+              Manage Broadcasts <ArrowRight className="ml-1 h-3 w-3" />
+            </Button>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {broadcasts.map((bc) => (
+              <div key={bc.id} className="p-3 rounded-xl bg-card border border-destructive/20 space-y-2">
+                <div className="flex items-center justify-between">
+                  <Badge variant="destructive" className="text-[10px] font-mono">
+                    {bc.category}
+                  </Badge>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    {new Date(bc.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+                <h4 className="text-xs font-bold text-foreground">{bc.title}</h4>
+                <p className="text-xs text-muted-foreground line-clamp-2">{bc.message}</p>
+                <div className="flex items-center justify-between pt-1 border-t border-border/50 text-[10px]">
+                  <span className="text-primary font-semibold">Target: {bc.targetAudience}</span>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      deleteBroadcastAlert(bc.id);
+                      setBroadcasts(getBroadcastAlerts());
+                      toast.success(`Dismissed "${bc.title}" from Student and Driver screens.`);
+                    }}
+                    className="h-6 px-2 text-[10px] text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-3 w-3 mr-1" /> Dismiss Alert
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* 1. CRITICAL OPERATIONAL ALERTS BANNER */}
       {(pendingDriverApps > 0 || overdueFeesCount > 0 || suspendedStudentsCount > 0 || maintenanceBuses > 0) && (
         <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5 space-y-3">
@@ -358,6 +454,105 @@ export function AdminDashboardOverview({
                 </div>
                 <p className="text-xs text-primary font-medium">{r.service_type} • {r.city} • {r.passengers} Pax</p>
                 <p className="text-[11px] text-muted-foreground">Phone: {r.phone} {r.organization ? `• ${r.organization}` : ""}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* 6. DRIVER SHIFT ONBOARDING FEED & STUDENT REVIEWS PREVIEW */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Driver Shift Attendance & Onboarding Activity */}
+        <div className="card-elevated p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-border pb-4">
+            <div>
+              <h3 className="font-bold text-base text-foreground flex items-center gap-2">
+                <UserCheck className="h-5 w-5 text-emerald-600" /> Driver Shift Attendance & Onboarding
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Automatic driver check-in triggered when drivers launch their assigned routes
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onNavigateTab("trips")}
+              className="text-xs text-primary"
+            >
+              View Trips <ArrowRight className="ml-1 h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          <div className="divide-y divide-border">
+            {driverOnboardings.slice(0, 3).map((item) => (
+              <div key={item.id} className="py-3 flex items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs text-foreground">{item.driver_name}</span>
+                    <Badge variant="outline" className="text-[10px] font-mono">
+                      {item.vehicle_code}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground line-clamp-1">{item.route_name}</p>
+                  <p className="text-[10px] text-muted-foreground font-mono">
+                    Shift Started: {item.start_time}
+                    {item.end_time && ` • Ended: ${item.end_time}`}
+                  </p>
+                </div>
+
+                <Badge
+                  className={
+                    item.status === "COMPLETED"
+                      ? "bg-blue-500/15 text-blue-600 font-bold text-xs"
+                      : "bg-emerald-500/15 text-emerald-600 font-bold text-xs"
+                  }
+                >
+                  {item.status === "COMPLETED" ? "COMPLETED" : "ON DUTY"}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Passenger Ratings & Reviews Feed */}
+        <div className="card-elevated p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-border pb-4">
+            <div>
+              <h3 className="font-bold text-base text-foreground flex items-center gap-2">
+                <Star className="h-5 w-5 text-amber-500 fill-amber-500" /> Student Ratings & Feedback
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Driver conduct and fleet cleanliness ratings submitted by students
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onNavigateTab("drivers")}
+              className="text-xs text-primary"
+            >
+              All Drivers <ArrowRight className="ml-1 h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          <div className="divide-y divide-border">
+            {studentReviews.slice(0, 3).map((rev) => (
+              <div key={rev.id} className="py-3 space-y-1">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs text-foreground">{rev.student_name}</span>
+                    <span className="text-[10px] text-muted-foreground">• Driver: {rev.driver_name}</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-amber-500 text-xs font-bold">
+                    <Star className="h-3 w-3 fill-amber-500" />
+                    <span>{rev.overall_rating}.0</span>
+                  </div>
+                </div>
+                <p className="text-xs text-foreground font-medium italic">"{rev.comment}"</p>
+                <div className="flex items-center gap-3 text-[10px] text-muted-foreground pt-0.5">
+                  <Badge variant="secondary" className="text-[9px]">Comfort: {rev.comfort_rating}/5</Badge>
+                  <span>Punctuality: {rev.punctuality_rating}/5</span>
+                </div>
               </div>
             ))}
           </div>

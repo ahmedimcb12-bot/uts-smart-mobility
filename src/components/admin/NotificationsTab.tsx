@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Bell,
   Send,
@@ -10,6 +10,14 @@ import {
   Clock,
   Filter,
   Search,
+  Trash2,
+  AlertTriangle,
+  Radio,
+  EyeOff,
+  Eye,
+  RefreshCw,
+  Power,
+  XCircle,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -31,7 +39,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { RouteItem, BusItem } from "@/lib/admin-operations-store";
+import {
+  getBroadcastAlerts,
+  deleteBroadcastAlert,
+  toggleBroadcastAlertStatus,
+  UTS_BROADCAST_EVENT_KEY,
+  type RouteItem,
+  type BroadcastAlertItem,
+} from "@/lib/admin-operations-store";
 import { toast } from "sonner";
 
 interface NotificationsTabProps {
@@ -43,15 +58,28 @@ interface NotificationsTabProps {
     subject: string;
     body: string;
   }) => Promise<void>;
+  onDeleteNotification?: (id: string) => Promise<void>;
 }
 
 export function NotificationsTab({
   notifications,
   routes,
   onSendBroadcast,
+  onDeleteNotification,
 }: NotificationsTabProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [isComposeModalOpen, setIsComposeModalOpen] = useState(false);
+
+  // Live Broadcast Alerts state (Active on Student & Driver Dashboards)
+  const [liveBroadcasts, setLiveBroadcasts] = useState<BroadcastAlertItem[]>(getBroadcastAlerts);
+
+  useEffect(() => {
+    const handleBroadcastUpdate = () => {
+      setLiveBroadcasts(getBroadcastAlerts());
+    };
+    window.addEventListener(UTS_BROADCAST_EVENT_KEY, handleBroadcastUpdate);
+    return () => window.removeEventListener(UTS_BROADCAST_EVENT_KEY, handleBroadcastUpdate);
+  }, []);
 
   // Form State
   const [category, setCategory] = useState("ANNOUNCEMENT");
@@ -76,15 +104,32 @@ export function NotificationsTab({
         body: body.trim(),
       });
 
+      setLiveBroadcasts(getBroadcastAlerts());
       setIsComposeModalOpen(false);
       setSubject("");
       setBody("");
-      toast.success("Broadcast notification dispatched successfully to intended recipients!");
+      toast.success("Broadcast notification dispatched successfully to Student and Driver consoles!");
     } catch (err) {
       toast.error("Failed to dispatch broadcast notice.");
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleRemoveLiveBroadcast = (alertId: string, title: string) => {
+    deleteBroadcastAlert(alertId);
+    setLiveBroadcasts(getBroadcastAlerts());
+    toast.success(`Removed broadcast: "${title}". Notice dismissed from Student and Driver consoles.`);
+  };
+
+  const handleToggleBroadcastStatus = (alertId: string, currentActive: boolean, title: string) => {
+    toggleBroadcastAlertStatus(alertId, !currentActive);
+    setLiveBroadcasts(getBroadcastAlerts());
+    toast.info(
+      !currentActive
+        ? `Broadcast activated: "${title}" is now visible to passengers/drivers.`
+        : `Broadcast paused: "${title}" is hidden from passenger/driver screens.`,
+    );
   };
 
   const filteredNotifs = notifications.filter((n) => {
@@ -105,30 +150,137 @@ export function NotificationsTab({
               <Bell className="h-5 w-5 text-primary" /> Notification Center & Targeted Broadcast Engine
             </h2>
             <p className="text-xs text-muted-foreground">
-              Dispatch route change alerts, trip cancellations, schedule updates, and emergency notices to specific recipient groups.
+              Dispatch live broadcast alerts to student maps & driver manifests, manage active banners, and dismiss expired announcements.
             </p>
           </div>
 
-          <Button onClick={() => setIsComposeModalOpen(true)} className="bg-primary text-primary-foreground text-xs h-9">
-            <Send className="mr-1.5 h-4 w-4" /> Compose Targeted Broadcast
-          </Button>
-        </div>
-
-        <div className="pt-2 border-t border-border">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search notifications log by subject, recipient, or category..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 text-xs"
-            />
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setIsComposeModalOpen(true)} className="bg-primary text-primary-foreground text-xs h-9">
+              <Send className="mr-1.5 h-4 w-4" /> Compose Targeted Broadcast
+            </Button>
           </div>
         </div>
       </div>
 
-      {/* Dispatched Notifications Log Table */}
-      <div className="card-elevated overflow-hidden">
+      {/* 1. LIVE ACTIVE BROADCASTS ON STUDENT & DRIVER SCREENS */}
+      <div className="card-elevated p-6 space-y-4 border-l-4 border-l-destructive">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3">
+          <div className="flex items-center gap-2">
+            <Radio className="h-5 w-5 text-destructive animate-pulse" />
+            <div>
+              <h3 className="text-base font-bold text-foreground">
+                Active Live Broadcasts & Weather Warnings ({liveBroadcasts.length})
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                These alerts are currently streaming to student dashboards and driver consoles. Only Admins have permission to remove them.
+              </p>
+            </div>
+          </div>
+          <Badge className="bg-destructive/15 text-destructive font-mono text-[10px]">
+            REAL-TIME CONTROLLER
+          </Badge>
+        </div>
+
+        {liveBroadcasts.length === 0 ? (
+          <div className="py-8 text-center text-xs text-muted-foreground bg-muted/20 rounded-xl border border-dashed border-border">
+            No active broadcast notices currently streaming. Click "Compose Targeted Broadcast" above to dispatch one.
+          </div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {liveBroadcasts.map((b) => (
+              <div
+                key={b.id}
+                className={`p-4 rounded-xl border transition-all space-y-3 ${
+                  b.active
+                    ? b.severity === "CRITICAL"
+                      ? "bg-destructive/10 border-destructive/40 text-foreground"
+                      : b.severity === "HIGH"
+                        ? "bg-amber-500/10 border-amber-500/40 text-foreground"
+                        : "bg-primary/10 border-primary/40 text-foreground"
+                    : "bg-muted/30 border-border text-muted-foreground opacity-60"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge
+                        variant={b.severity === "CRITICAL" ? "destructive" : "secondary"}
+                        className="text-[10px] font-mono"
+                      >
+                        {b.category}
+                      </Badge>
+                      <Badge variant="outline" className="text-[10px] font-mono">
+                        Target: {b.targetAudience}
+                      </Badge>
+                      <Badge
+                        className={`text-[9px] ${
+                          b.active
+                            ? "bg-emerald-500 text-white"
+                            : "bg-muted text-muted-foreground"
+                        }`}
+                      >
+                        {b.active ? "LIVE STREAMING" : "PAUSED"}
+                      </Badge>
+                    </div>
+                    <h4 className="font-bold text-sm text-foreground">{b.title}</h4>
+                  </div>
+                </div>
+
+                <p className="text-xs text-foreground/90 leading-relaxed">{b.message}</p>
+
+                <div className="pt-2 border-t border-border/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                  <span>
+                    By <strong>{b.created_by_name}</strong> • {new Date(b.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+
+                  <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleToggleBroadcastStatus(b.id, b.active, b.title)}
+                      className="h-7 px-2 text-xs"
+                      title={b.active ? "Pause notice" : "Resume notice"}
+                    >
+                      {b.active ? <EyeOff className="h-3.5 w-3.5 mr-1" /> : <Eye className="h-3.5 w-3.5 mr-1" />}
+                      {b.active ? "Pause" : "Resume"}
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => handleRemoveLiveBroadcast(b.id, b.title)}
+                      className="h-7 px-2.5 text-xs font-semibold bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+                      title="Remove notification from student and driver dashboards"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-1" /> Remove from Portals
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 2. DISPATCHED NOTIFICATIONS LOG TABLE */}
+      <div className="card-elevated overflow-hidden space-y-3">
+        <div className="p-6 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 className="text-base font-bold text-foreground">Dispatched Notifications Audit Log</h3>
+            <p className="text-xs text-muted-foreground">Archived history of all email dispatches, SMS alerts, and targeted broadcasts.</p>
+          </div>
+
+          <div className="relative w-full sm:w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Filter log..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 text-xs h-8"
+            />
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-muted/50 text-xs uppercase font-semibold text-muted-foreground">
@@ -140,38 +292,46 @@ export function NotificationsTab({
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filteredNotifs.map((n) => (
-                <tr key={n.id} className="hover:bg-muted/30 transition-colors">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="text-[10px] font-mono uppercase">{n.category || "GENERAL"}</Badge>
-                      <strong className="text-xs text-foreground">{n.subject}</strong>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{n.body}</p>
-                  </td>
-
-                  <td className="px-6 py-4 text-xs font-semibold text-foreground">
-                    {n.recipient_name || "All Enrolled Users"}
-                  </td>
-
-                  <td className="px-6 py-4">
-                    <span
-                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                        n.status === "SENT"
-                          ? "bg-emerald-500/15 text-emerald-600"
-                          : "bg-blue-500/15 text-blue-600"
-                      }`}
-                    >
-                      <CheckCircle2 className="h-3 w-3" />
-                      {n.status}
-                    </span>
-                  </td>
-
-                  <td className="px-6 py-4 text-xs text-muted-foreground font-mono">
-                    {n.created_at ? new Date(n.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Today"}
+              {filteredNotifs.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="px-6 py-8 text-center text-xs text-muted-foreground">
+                    No dispatched notification records found.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filteredNotifs.map((n) => (
+                  <tr key={n.id} className="hover:bg-muted/30 transition-colors">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-[10px] font-mono uppercase">{n.category || "GENERAL"}</Badge>
+                        <strong className="text-xs text-foreground">{n.subject}</strong>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{n.body}</p>
+                    </td>
+
+                    <td className="px-6 py-4 text-xs font-semibold text-foreground">
+                      {n.recipient_name || "All Enrolled Users"}
+                    </td>
+
+                    <td className="px-6 py-4">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                          n.status === "SENT"
+                            ? "bg-emerald-500/15 text-emerald-600"
+                            : "bg-blue-500/15 text-blue-600"
+                        }`}
+                      >
+                        <CheckCircle2 className="h-3 w-3" />
+                        {n.status}
+                      </span>
+                    </td>
+
+                    <td className="px-6 py-4 text-xs text-muted-foreground font-mono">
+                      {n.created_at ? new Date(n.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Today"}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -185,7 +345,7 @@ export function NotificationsTab({
               <Send className="h-5 w-5 text-primary" /> Compose Broadcast Notification
             </DialogTitle>
             <DialogDescription>
-              Select targeted audience group to avoid unnecessary mass spam.
+              Select targeted audience group to stream live alert to student dashboards and driver consoles.
             </DialogDescription>
           </DialogHeader>
 
@@ -199,6 +359,8 @@ export function NotificationsTab({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="ANNOUNCEMENT">General Announcement</SelectItem>
+                    <SelectItem value="WEATHER">Thunderstorm / Weather Alert</SelectItem>
+                    <SelectItem value="EMERGENCY">Emergency Operations Alert</SelectItem>
                     <SelectItem value="ROUTE_UPDATE">Route Itinerary Update</SelectItem>
                     <SelectItem value="SCHEDULE_CHANGE">Schedule Shift Adjustment</SelectItem>
                     <SelectItem value="BUS_CANCELLATION">Emergency Bus Cancellation</SelectItem>
@@ -215,7 +377,7 @@ export function NotificationsTab({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="ALL_USERS">All Transport Users</SelectItem>
+                    <SelectItem value="ALL_USERS">All Transport Users (Students + Drivers)</SelectItem>
                     <SelectItem value="DRIVERS_ONLY">Drivers Only</SelectItem>
                     <SelectItem value="STUDENTS_ONLY">Students / Passengers Only</SelectItem>
                     {routes.map((r) => (
@@ -231,11 +393,11 @@ export function NotificationsTab({
             <div className="space-y-1">
               <Label className="text-xs">Subject Line *</Label>
               <Input
-                placeholder="e.g. Schedule Change: NUST Route 01 departure shifted to 07:20 AM"
+                placeholder="e.g. Weather Warning: Thunderstorm alert & route timing advisory"
                 value={subject}
                 onChange={(e) => setSubject(e.target.value)}
                 required
-                className="text-xs"
+                className="text-xs font-semibold"
               />
             </div>
 
@@ -255,7 +417,7 @@ export function NotificationsTab({
               <Button type="button" variant="outline" onClick={() => setIsComposeModalOpen(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={submitting} className="bg-primary text-primary-foreground">
+              <Button type="submit" disabled={submitting} className="bg-primary text-primary-foreground font-semibold">
                 {submitting ? "Dispatching..." : "Dispatch Broadcast"}
               </Button>
             </DialogFooter>
@@ -265,3 +427,4 @@ export function NotificationsTab({
     </div>
   );
 }
+

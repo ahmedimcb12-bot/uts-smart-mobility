@@ -26,26 +26,18 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { AdminUserItem } from "@/lib/admin-operations-store";
 import { toast } from "sonner";
 
 interface SystemAdminTabProps {
   adminUsers: AdminUserItem[];
-  isSuperAdmin: boolean;
+  isSuperAdmin?: boolean;
   onAddAdminUser: (admin: Omit<AdminUserItem, "id" | "created_at">) => Promise<void>;
   onToggleAdminStatus: (adminId: string, active: boolean) => Promise<void>;
 }
 
 export function SystemAdminTab({
   adminUsers,
-  isSuperAdmin,
   onAddAdminUser,
   onToggleAdminStatus,
 }: SystemAdminTabProps) {
@@ -56,7 +48,6 @@ export function SystemAdminTab({
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [role, setRole] = useState<"SUPER_ADMIN" | "ADMIN">("ADMIN");
   const [submitting, setSubmitting] = useState(false);
 
   const filteredAdmins = adminUsers.filter((a) => {
@@ -79,7 +70,7 @@ export function SystemAdminTab({
         full_name: fullName.trim(),
         email: email.trim(),
         phone: phone.trim() || "03124567891",
-        role,
+        role: "ADMIN",
         status: "ACTIVE",
         last_login: "Never",
       });
@@ -87,6 +78,7 @@ export function SystemAdminTab({
       setIsAddModalOpen(false);
       setFullName("");
       setEmail("");
+      setPhone("");
       toast.success(`Administrative account created for ${fullName}!`);
     } catch (err) {
       toast.error("Failed to create admin user.");
@@ -102,42 +94,40 @@ export function SystemAdminTab({
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5 text-primary" /> System Administration & RBAC Security
+              <ShieldCheck className="h-5 w-5 text-primary" /> Admin Users & Security
             </h2>
             <p className="text-xs text-muted-foreground">
-              Manage executive administrative accounts, assign operational roles, and audit security permissions.
+              Manage operations administrator accounts, audit authorization credentials, and control access permissions.
             </p>
           </div>
 
-          {isSuperAdmin && (
-            <Button onClick={() => setIsAddModalOpen(true)} className="bg-primary text-primary-foreground text-xs h-9">
-              <Plus className="mr-1.5 h-4 w-4" /> Add Admin User
-            </Button>
-          )}
+          <Button onClick={() => setIsAddModalOpen(true)} className="bg-primary text-primary-foreground text-xs h-9">
+            <Plus className="mr-1.5 h-4 w-4" /> Add Admin User
+          </Button>
         </div>
       </div>
 
-      {/* Role & Permissions Matrix */}
+      {/* Role & Permissions Overview */}
       <div className="grid gap-6 md:grid-cols-2">
         <div className="card-elevated p-6 space-y-3">
           <div className="flex items-center justify-between border-b border-border pb-3">
             <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
-              <ShieldAlert className="h-4 w-4 text-primary" /> Super Administrator Privileges
+              <ShieldAlert className="h-4 w-4 text-primary" /> Operations Administrator Authority
             </h3>
-            <Badge className="bg-primary text-primary-foreground text-[10px]">Unrestricted</Badge>
+            <Badge className="bg-primary text-primary-foreground text-[10px]">Staff Admin</Badge>
           </div>
           <ul className="space-y-1.5 text-xs text-muted-foreground">
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Full governance & security administrative control
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Full fleet dispatch, vehicle scheduling & route conflict resolution
             </li>
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Manage admin accounts & assign roles
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Driver applicant verification, credential validation & shift monitor
             </li>
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Permanent student disciplinary expulsion authority
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Disciplinary case management, temporary suspension & student reinstatement
             </li>
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Complete system configuration & database sync
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Campus-wide broadcast notifications, weather alerts & fee reminders
             </li>
           </ul>
         </div>
@@ -145,22 +135,22 @@ export function SystemAdminTab({
         <div className="card-elevated p-6 space-y-3">
           <div className="flex items-center justify-between border-b border-border pb-3">
             <h3 className="font-bold text-sm text-foreground flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-muted-foreground" /> Operations Administrator Privileges
+              <Lock className="h-4 w-4 text-accent" /> Security Protocol & Credential Isolation
             </h3>
-            <Badge variant="secondary" className="text-[10px]">Operational Scope</Badge>
+            <Badge variant="outline" className="text-[10px]">RBAC Protection</Badge>
           </div>
           <ul className="space-y-1.5 text-xs text-muted-foreground">
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Driver applications verification & route dispatch
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Public registration strictly restricted to Students & Driver applicants
             </li>
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Bus registry, scheduling conflict validation & maintenance
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Administrative accounts require pre-provisioning or seed credentials
             </li>
             <li className="flex items-center gap-2">
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Passenger assignments, fee collection & complaints triage
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Immutable audit logging of all fleet, route & student status modifications
             </li>
-            <li className="flex items-center gap-2 text-muted-foreground/70">
-              <XCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0" /> Cannot create or delete Super Admin accounts
+            <li className="flex items-center gap-2">
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" /> Master Admin Seed: <span className="font-mono text-foreground font-semibold">admin@uts.com.pk</span>
             </li>
           </ul>
         </div>
@@ -183,7 +173,7 @@ export function SystemAdminTab({
                 <th className="px-6 py-3.5">Assigned Role</th>
                 <th className="px-6 py-3.5">Account Status</th>
                 <th className="px-6 py-3.5">Last Login</th>
-                {isSuperAdmin && <th className="px-6 py-3.5 text-right">Actions</th>}
+                <th className="px-6 py-3.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -195,14 +185,8 @@ export function SystemAdminTab({
                   </td>
 
                   <td className="px-6 py-4">
-                    <Badge
-                      className={
-                        admin.role === "SUPER_ADMIN"
-                          ? "bg-primary text-primary-foreground text-[10px]"
-                          : "bg-secondary text-secondary-foreground text-[10px]"
-                      }
-                    >
-                      {admin.role}
+                    <Badge className="bg-primary text-primary-foreground text-[10px]">
+                      {admin.role || "ADMIN"}
                     </Badge>
                   </td>
 
@@ -223,20 +207,16 @@ export function SystemAdminTab({
                     {admin.last_login || "Recent"}
                   </td>
 
-                  {isSuperAdmin && (
-                    <td className="px-6 py-4 text-right">
-                      {admin.role !== "SUPER_ADMIN" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 px-2.5 text-xs"
-                          onClick={() => onToggleAdminStatus(admin.id, admin.status !== "ACTIVE")}
-                        >
-                          {admin.status === "ACTIVE" ? "Deactivate" : "Activate"}
-                        </Button>
-                      )}
-                    </td>
-                  )}
+                  <td className="px-6 py-4 text-right">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2.5 text-xs"
+                      onClick={() => onToggleAdminStatus(admin.id, admin.status !== "ACTIVE")}
+                    >
+                      {admin.status === "ACTIVE" ? "Deactivate" : "Activate"}
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -252,7 +232,7 @@ export function SystemAdminTab({
               <ShieldCheck className="h-5 w-5 text-primary" /> Create Administrator Account
             </DialogTitle>
             <DialogDescription>
-              Assign role privileges and invite an operations administrator.
+              Assign credentials and provision an operations administrator account.
             </DialogDescription>
           </DialogHeader>
 
@@ -292,17 +272,9 @@ export function SystemAdminTab({
               </div>
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-xs">Role Assignment *</Label>
-              <Select value={role} onValueChange={(val: any) => setRole(val)}>
-                <SelectTrigger className="text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ADMIN">Operations Administrator</SelectItem>
-                  <SelectItem value="SUPER_ADMIN">Super Administrator (Executive)</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="p-3 rounded-xl bg-muted/50 text-xs text-muted-foreground space-y-1">
+              <span className="font-semibold text-foreground">Role Provisioning:</span>
+              <p>Account will be authorized with standard <strong>ADMIN</strong> permissions across the fleet management platform.</p>
             </div>
 
             <DialogFooter>
@@ -319,3 +291,4 @@ export function SystemAdminTab({
     </div>
   );
 }
+

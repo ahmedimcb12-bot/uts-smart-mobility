@@ -24,7 +24,7 @@ import {
 import { PublicLayout } from "@/components/site/PublicLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useAuth } from "@/hooks/use-auth";
+import { useAuth, isValidUuid } from "@/hooks/use-auth";
 import { supabase } from "@/integrations/supabase/client";
 import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { AdminDashboardOverview } from "@/components/admin/AdminDashboardOverview";
@@ -60,6 +60,8 @@ import {
   type DriverItem,
   type RouteItem,
   type AdminUserItem,
+  saveBroadcastAlert,
+  addStudentSimulatedEmail,
 } from "@/lib/admin-operations-store";
 import type {
   StudentTransportRecord,
@@ -67,6 +69,7 @@ import type {
   ScheduleItem,
   FeePaymentStatus,
 } from "@/lib/transport-eligibility";
+import { OfflineAttendanceQueue, ATTENDANCE_EVENT_KEY } from "@/lib/offline-attendance-queue";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/admin")({
@@ -136,7 +139,7 @@ function AdminDashboardPage() {
   const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceRecordItem[]>([]);
   const [dataLoading, setDataLoading] = useState(false);
 
-  const isSuperAdmin = role === "SUPER_ADMIN" || profile?.role === "SUPER_ADMIN";
+  const isSuperAdmin = true; // Unified Admin Authority for operations & security
 
   // Persist local store updates
   useEffect(() => {
@@ -219,41 +222,93 @@ function AdminDashboardPage() {
         ]);
       }
 
-      // 3. Attendance
+      // 3. Attendance Manifests
+      const queue = OfflineAttendanceQueue.getQueue();
       const { data: attData } = await supabase
         .from("attendance")
-        .select("*, students(full_name), routes(name)")
+        .select("*, students(full_name, institution, phone), routes(name), drivers(full_name)")
         .order("service_date", { ascending: false })
-        .limit(40);
-      if (attData && attData.length > 0) setAttendance(attData);
-      else {
-        setAttendance([
-          {
-            id: "a1",
-            service_date: new Date().toISOString().split("T")[0],
-            status: "PRESENT",
-            source: "DRIVER",
-            students: { full_name: "Ahmed Hussain" },
-            routes: { name: "NUST Morning Route 01" },
-          },
-          {
-            id: "a2",
-            service_date: new Date().toISOString().split("T")[0],
-            status: "PRESENT",
-            source: "DRIVER",
-            students: { full_name: "Hamza Ali" },
-            routes: { name: "NUST Morning Route 01" },
-          },
-          {
-            id: "a3",
-            service_date: new Date().toISOString().split("T")[0],
-            status: "ABSENT",
-            source: "AUTO",
-            students: { full_name: "Bilal Farooq" },
-            routes: { name: "NUST Morning Route 01" },
-          },
-        ]);
+        .limit(60);
+
+      const baseList =
+        attData && attData.length > 0
+          ? attData
+          : [
+              {
+                id: "a1",
+                student_id: "std-1",
+                service_date: new Date().toISOString().split("T")[0],
+                shift_id: "MORNING",
+                status: "PRESENT",
+                source: "DRIVER",
+                students: { full_name: "Ahmed Hussain", roll_no: "NUST-SE-88" },
+                routes: { name: "NUST Morning Route 01 (Islamabad West)" },
+                drivers: { full_name: "Muhammad Tariq" },
+              },
+              {
+                id: "a2",
+                student_id: "std-2",
+                service_date: new Date().toISOString().split("T")[0],
+                shift_id: "MORNING",
+                status: "PRESENT",
+                source: "DRIVER",
+                students: { full_name: "Hamza Ali", roll_no: "NUST-CS-45" },
+                routes: { name: "NUST Morning Route 01 (Islamabad West)" },
+                drivers: { full_name: "Muhammad Tariq" },
+              },
+              {
+                id: "a3",
+                student_id: "std-3",
+                service_date: new Date().toISOString().split("T")[0],
+                shift_id: "MORNING",
+                status: "ABSENT",
+                source: "AUTO",
+                students: { full_name: "Bilal Farooq", roll_no: "NUST-ME-67" },
+                routes: { name: "NUST Morning Route 01 (Islamabad West)" },
+                drivers: { full_name: "Muhammad Tariq" },
+              },
+              {
+                id: "a4",
+                student_id: "std-4",
+                service_date: new Date().toISOString().split("T")[0],
+                shift_id: "MORNING",
+                status: "PENDING",
+                source: "DRIVER",
+                students: { full_name: "Ali Khan", roll_no: "NUST-EE-12" },
+                routes: { name: "NUST Morning Route 01 (Islamabad West)" },
+                drivers: { full_name: "Muhammad Tariq" },
+              },
+            ];
+
+      // Merge queued local attendance marks
+      const mergedAttendance = [...baseList];
+      for (const q of queue) {
+        const idx = mergedAttendance.findIndex(
+          (m) =>
+            m.student_id === q.studentId &&
+            m.service_date === q.serviceDate &&
+            (m.shift_id || "MORNING") === (q.shiftId || "MORNING"),
+        );
+        const item = {
+          id: q.id,
+          student_id: q.studentId,
+          service_date: q.serviceDate,
+          shift_id: q.shiftId || "MORNING",
+          status: q.status,
+          source: q.source || "DRIVER",
+          marked_at: q.markedAt,
+          students: { full_name: q.studentName || "Student Passenger", roll_no: "NUST-SE-88" },
+          routes: { name: q.routeName || "NUST Morning Route 01" },
+          drivers: { full_name: q.driverName || "Muhammad Tariq" },
+        };
+        if (idx >= 0) {
+          mergedAttendance[idx] = { ...mergedAttendance[idx], ...item };
+        } else {
+          mergedAttendance.unshift(item);
+        }
       }
+
+      setAttendance(mergedAttendance);
 
       // 4. Fees
       const { data: feeData } = await supabase
@@ -321,26 +376,39 @@ function AdminDashboardPage() {
       }
 
       // 6. Audit Logs
-      const { data: auditData } = await supabase
-        .from("audit_logs")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(40);
-      if (auditData && auditData.length > 0) setAuditLogs(auditData as any);
-      else {
-        setAuditLogs([
-          {
-            id: "log-1",
-            actor_id: null,
-            actor_role: "SUPER_ADMIN",
-            action: "DISCIPLINARY_SUSPENSION",
-            entity_type: "students",
-            entity_id: "std-4",
-            details: { student_name: "Daniyal Khan", action: "TEMPORARY_SUSPENSION", reason: "Driver altercation" },
-            ip_address: "127.0.0.1",
-            created_at: new Date().toISOString(),
-          },
-        ]);
+      try {
+        const savedLogs = localStorage.getItem("uts_admin_audit_logs");
+        let initialLogs = savedLogs ? JSON.parse(savedLogs) : [];
+
+        const { data: auditData, error: auditError } = await supabase
+          .from("audit_logs")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(40);
+
+        if (!auditError && auditData && auditData.length > 0) {
+          setAuditLogs(auditData as any);
+        } else if (initialLogs.length > 0) {
+          setAuditLogs(initialLogs);
+        } else {
+          const fallbackLog = [
+            {
+              id: "log-1",
+              actor_id: null,
+              actor_role: "ADMIN",
+              action: "DISCIPLINARY_SUSPENSION",
+              entity_type: "students",
+              entity_id: "std-4",
+              details: { student_name: "Daniyal Khan", action: "TEMPORARY_SUSPENSION", reason: "Driver altercation" },
+              ip_address: "127.0.0.1",
+              created_at: new Date().toISOString(),
+            },
+          ];
+          setAuditLogs(fallbackLog);
+          localStorage.setItem("uts_admin_audit_logs", JSON.stringify(fallbackLog));
+        }
+      } catch (err) {
+        console.warn("Audit logs hydration note:", err);
       }
     } catch (err) {
       console.warn("Notice: Loaded operations state from local cache:", err);
@@ -351,6 +419,61 @@ function AdminDashboardPage() {
 
   useEffect(() => {
     loadAdminData();
+
+    // Live attendance synchronization listener
+    const handleAttendanceEvent = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail) {
+        setAttendance((prev) => {
+          const idx = prev.findIndex(
+            (p) =>
+              p.student_id === detail.studentId &&
+              p.service_date === detail.serviceDate &&
+              (p.shift_id || "MORNING") === (detail.shiftId || "MORNING"),
+          );
+          const newItem = {
+            id: detail.id,
+            student_id: detail.studentId,
+            service_date: detail.serviceDate,
+            shift_id: detail.shiftId || "MORNING",
+            status: detail.status,
+            source: detail.source || "DRIVER",
+            marked_at: detail.markedAt,
+            students: { full_name: detail.studentName || "Student Passenger", roll_no: "NUST-SE-88" },
+            routes: { name: detail.routeName || "NUST Morning Route 01" },
+            drivers: { full_name: detail.driverName || "Muhammad Tariq" },
+          };
+          if (idx >= 0) {
+            const updated = [...prev];
+            updated[idx] = { ...updated[idx], ...newItem };
+            return updated;
+          }
+          return [newItem, ...prev];
+        });
+      }
+    };
+
+    window.addEventListener(ATTENDANCE_EVENT_KEY, handleAttendanceEvent);
+
+    const channel = supabase
+      .channel("admin-attendance-feed")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "attendance",
+        },
+        () => {
+          loadAdminData();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      window.removeEventListener(ATTENDANCE_EVENT_KEY, handleAttendanceEvent);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   // Helper to record audit log
@@ -358,7 +481,7 @@ function AdminDashboardPage() {
     const newLog: AuditLogItem = {
       id: `log-${Date.now()}`,
       actor_id: user?.id || null,
-      actor_role: isSuperAdmin ? "SUPER_ADMIN" : "ADMIN",
+      actor_role: "ADMIN",
       action,
       entity_type: entityType,
       entity_id: entityId,
@@ -367,19 +490,27 @@ function AdminDashboardPage() {
       created_at: new Date().toISOString(),
     };
 
-    setAuditLogs((prev) => [newLog, ...prev]);
+    setAuditLogs((prev) => {
+      const updated = [newLog, ...prev];
+      try {
+        localStorage.setItem("uts_admin_audit_logs", JSON.stringify(updated.slice(0, 100)));
+      } catch (e) {}
+      return updated;
+    });
 
-    try {
-      await supabase.from("audit_logs").insert({
-        actor_id: user?.id || null,
-        actor_role: isSuperAdmin ? "SUPER_ADMIN" : "ADMIN",
-        action,
-        entity_type: entityType,
-        entity_id: entityId,
-        details,
-      });
-    } catch (e) {
-      // Local audit log preserved
+    if (user && isValidUuid(user.id)) {
+      try {
+        await supabase.from("audit_logs").insert({
+          actor_id: user.id,
+          actor_role: "ADMIN",
+          action,
+          entity_type: entityType,
+          entity_id: entityId,
+          details,
+        });
+      } catch (e) {
+        // Local audit log preserved
+      }
     }
   };
 
@@ -670,6 +801,29 @@ function AdminDashboardPage() {
       created_at: new Date().toISOString(),
     };
     setNotifications((prev) => [newBroadcast, ...prev]);
+
+    // Cross-panel reactive sync:
+    saveBroadcastAlert({
+      title: notif.subject,
+      message: notif.body,
+      category: notif.category === "WEATHER" ? "WEATHER" : notif.category === "MAINTENANCE" ? "MAINTENANCE" : notif.category === "SCHEDULE_CHANGE" ? "SCHEDULE" : "ANNOUNCEMENT",
+      severity: notif.category === "BUS_CANCELLATION" || notif.category === "EMERGENCY" ? "CRITICAL" : notif.category === "WEATHER" ? "HIGH" : "INFO",
+      targetAudience: notif.target_audience === "STUDENTS_ONLY" ? "STUDENTS" : notif.target_audience === "DRIVERS_ONLY" ? "DRIVERS" : "ALL",
+      active: true,
+      created_by_name: profile?.full_name || "Operations Admin",
+    });
+
+    if (notif.target_audience === "STUDENTS" || notif.target_audience === "ALL_USERS") {
+      addStudentSimulatedEmail({
+        student_email: "ahmed.hussain@nust.edu.pk",
+        student_name: "Ahmed Hussain",
+        subject: `[UTS Official Broadcast] ${notif.subject}`,
+        body: notif.body,
+        category: "GENERAL",
+        priority: notif.category === "EMERGENCY" ? "HIGH" : "NORMAL",
+      });
+    }
+
     await recordAudit("DISPATCH_BROADCAST", "notifications", newBroadcast.id, notif);
   };
 
@@ -911,7 +1065,13 @@ function AdminDashboardPage() {
 
           {/* 10. TRIPS & ATTENDANCE */}
           {activeTab === "trips" && (
-            <TripsAttendanceTab schedules={schedules} attendance={attendance} />
+            <TripsAttendanceTab
+              schedules={schedules}
+              attendance={attendance}
+              routes={routes}
+              drivers={drivers}
+              students={students}
+            />
           )}
 
           {/* 11. COMPLAINTS & FEEDBACK */}
@@ -964,7 +1124,7 @@ function AdminDashboardPage() {
           )}
 
           {/* 15. SYSTEM ADMIN & RBAC */}
-          {activeTab === "system" && isSuperAdmin && (
+          {activeTab === "system" && (
             <SystemAdminTab
               adminUsers={adminUsers}
               isSuperAdmin={isSuperAdmin}
