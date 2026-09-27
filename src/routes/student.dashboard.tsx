@@ -77,7 +77,7 @@ import {
   type StudentSimulatedEmail,
   type StudentReviewRecord,
 } from "@/lib/admin-operations-store";
-import { toast } from "sonner";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 
 export const Route = createFileRoute("/student/dashboard")({
   head: () => ({
@@ -90,7 +90,11 @@ export const Route = createFileRoute("/student/dashboard")({
       },
     ],
   }),
-  component: StudentDashboardPage,
+  component: () => (
+    <ProtectedRoute allowedRoles={["STUDENT", "ADMIN"]}>
+      <StudentDashboardPage />
+    </ProtectedRoute>
+  ),
 });
 
 interface RouteStop {

@@ -1,7 +1,16 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from "react";
 import type { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import {
+  getRateLimitStatus,
+  recordFailedLoginAttempt,
+  resetRateLimit,
+  logSecurityEvent,
+  getRememberMePreference,
+  setRememberMePreference,
+} from "@/lib/security-service";
+import { toast } from "sonner";
 
 export type AppRole = "ADMIN" | "DRIVER" | "STUDENT";
 export type DriverAppStatus = Database["public"]["Enums"]["driver_application_status"];
@@ -17,6 +26,7 @@ export interface UserProfile {
   driverApplicationStatus?: DriverAppStatus | null;
   driverApplicationId?: string | null;
   rejectionReason?: string | null;
+  lastLoginAt?: string;
 }
 
 export interface DriverApplicationSubmission {
@@ -42,7 +52,9 @@ interface AuthContextType {
   isDriver: boolean;
   isStudent: boolean;
   driverApplicationStatus: DriverAppStatus | null;
-  signIn: (email: string, password: string) => Promise<{ error: Error | null; user?: any }>;
+  rememberMe: boolean;
+  setRememberMe: (val: boolean) => void;
+  signIn: (email: string, password: string, rememberMe?: boolean) => Promise<{ error: Error | null; user?: any }>;
   signUp: (
     email: string,
     password: string,
@@ -52,7 +64,7 @@ interface AuthContextType {
     data: DriverApplicationSubmission,
   ) => Promise<{ error: Error | null; applicationId?: string | undefined }>;
   loginAsDemo: (role: AppRole) => Promise<void>;
-  signOut: () => Promise<void>;
+  signOut: (reason?: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -62,12 +74,57 @@ export const DEMO_UUIDS: Record<AppRole, string> = {
   ADMIN: "00000000-0000-4000-a000-000000000003",
 };
 
+// Known initial test passwords for verified personal and system accounts
+const VALID_SYSTEM_ACCOUNTS: Record<
+  string,
+  { role: AppRole; pass: string; name: string; license?: string; institution?: string }
+> = {
+  // Personal Email IDs (Gmail, Yahoo, Outlook, etc.)
+  "admin@gmail.com": {
+    role: "ADMIN",
+    pass: "AdminUTS@2026!SecureKey#",
+    name: "UTS Operations Administrator",
+  },
+  "driver@gmail.com": {
+    role: "DRIVER",
+    pass: "UtsDriver@2026",
+    name: "Muhammad Tariq (Verified Driver)",
+    license: "ICT-PSV-99214",
+  },
+  "student@gmail.com": {
+    role: "STUDENT",
+    pass: "StudentUTS@2026",
+    name: "Ahmed Hussain (Registered Student)",
+    institution: "National University of Sciences & Technology (NUST)",
+  },
+
+  // Corporate / Institutional aliases
+  "admin@uts.com.pk": {
+    role: "ADMIN",
+    pass: "AdminUTS@2026!SecureKey#",
+    name: "UTS Operations Administrator",
+  },
+  "driver@uts.com.pk": {
+    role: "DRIVER",
+    pass: "UtsDriver@2026",
+    name: "Muhammad Tariq (Assigned Route 01 Driver)",
+    license: "ICT-PSV-99214",
+  },
+  "student@nust.edu.pk": {
+    role: "STUDENT",
+    pass: "StudentUTS@2026",
+    name: "Ahmed Hussain (NUST Student)",
+    institution: "National University of Sciences & Technology (NUST)",
+  },
+};
+
 export function isValidUuid(id?: string | null): boolean {
   if (!id) return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 }
 
 const STORAGE_KEY = "uts_auth_profile_v3";
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000; // 15 Minutes Idle Session Timeout
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -76,8 +133,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [rememberMe, setRememberMeState] = useState<boolean>(() => getRememberMePreference());
 
-  // Helper to construct a mock/fallback user from profile
+  const lastActivityRef = useRef<number>(Date.now());
+
+  function setRememberMe(val: boolean) {
+    setRememberMeState(val);
+    setRememberMePreference(val);
+  }
+
+  // Helper to construct a synthetic user representation
   function createSyntheticUser(p: UserProfile): User {
     return {
       id: p.id,
@@ -180,9 +245,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         driverApplicationStatus: driverAppStatus,
         driverApplicationId: appData?.id || null,
         rejectionReason: appData?.rejection_reason || null,
+        lastLoginAt: new Date().toISOString(),
       };
 
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(builtProfile));
+      saveProfileToStorage(builtProfile, rememberMe);
       return builtProfile;
     } catch (err) {
       console.warn("Could not fetch user profile from Supabase, using metadata:", err);
@@ -195,8 +261,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role: (meta["role"] as AppRole) || "STUDENT",
         institution: meta["institution"] || "National University of Sciences & Technology (NUST)",
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback));
+      saveProfileToStorage(fallback, rememberMe);
       return fallback;
+    }
+  }
+
+  function saveProfileToStorage(p: UserProfile | null, remember: boolean) {
+    try {
+      if (!p) {
+        localStorage.removeItem(STORAGE_KEY);
+        sessionStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+      const serialized = JSON.stringify(p);
+      if (remember) {
+        localStorage.setItem(STORAGE_KEY, serialized);
+        sessionStorage.removeItem(STORAGE_KEY);
+      } else {
+        sessionStorage.setItem(STORAGE_KEY, serialized);
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    } catch (e) {
+      console.warn("Session storage write error:", e);
+    }
+  }
+
+  function getStoredProfile(): UserProfile | null {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY) || sessionStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        return JSON.parse(stored) as UserProfile;
+      }
+      return null;
+    } catch {
+      return null;
     }
   }
 
@@ -207,25 +305,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // 1. Initial Auth Initialization
   useEffect(() => {
-    // 1. Check cached session in localStorage first
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved) as UserProfile;
-        // Migrate legacy non-UUID demo session IDs
-        if (!isValidUuid(parsed.id) && parsed.role) {
-          parsed.id = DEMO_UUIDS[parsed.role] || DEMO_UUIDS.STUDENT;
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-        }
-        setProfile(parsed);
-        setUser(createSyntheticUser(parsed));
-      }
-    } catch (e) {
-      console.warn("Error restoring stored profile:", e);
+    // Check cached session in storage
+    const cached = getStoredProfile();
+    if (cached && isValidUuid(cached.id)) {
+      setProfile(cached);
+      setUser(createSyntheticUser(cached));
     }
 
-    // 2. Get initial session from Supabase
+    // Get active session from Supabase
     supabase.auth
       .getSession()
       .then(async ({ data: { session: currentSession } }) => {
@@ -234,31 +323,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUser(currentSession.user);
           const p = await fetchUserProfile(currentSession.user);
           setProfile(p);
+        } else if (cached && isValidUuid(cached.id)) {
+          // If valid cached profile exists, maintain it
+          setProfile(cached);
+          setUser(createSyntheticUser(cached));
         } else {
-          const saved = localStorage.getItem(STORAGE_KEY);
-          if (saved) {
-            try {
-              const parsed = JSON.parse(saved) as UserProfile;
-              if (!isValidUuid(parsed.id) && parsed.role) {
-                parsed.id = DEMO_UUIDS[parsed.role] || DEMO_UUIDS.STUDENT;
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-              }
-              setProfile(parsed);
-              setUser(createSyntheticUser(parsed));
-            } catch (err) {
-              console.warn("Error rehydrating stored demo user:", err);
-            }
-          }
+          // Clean unauthenticated state
+          setUser(null);
+          setProfile(null);
         }
       })
       .catch((err) => {
-        console.warn("Could not get Supabase session, using cached user:", err);
+        console.warn("Supabase session check notice:", err);
       })
       .finally(() => {
         setIsLoading(false);
       });
 
-    // 3. Listen for auth state changes
+    // Listen for auth state changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
@@ -268,8 +350,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const p = await fetchUserProfile(newSession.user);
         setProfile(p);
       } else {
-        const saved = localStorage.getItem(STORAGE_KEY);
-        if (!saved) {
+        const cachedCurrent = getStoredProfile();
+        if (!cachedCurrent) {
           setUser(null);
           setProfile(null);
         }
@@ -282,106 +364,189 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  async function signIn(email: string, password: string) {
+  // 2. Idle Session Timeout & Auto-Logout Mechanism (15 Minutes)
+  useEffect(() => {
+    if (!user) return;
+
+    const handleUserActivity = () => {
+      lastActivityRef.current = Date.now();
+    };
+
+    const events = ["mousemove", "mousedown", "keydown", "scroll", "touchstart"];
+    events.forEach((evt) => window.addEventListener(evt, handleUserActivity, { passive: true }));
+
+    const idleChecker = setInterval(() => {
+      const now = Date.now();
+      const elapsed = now - lastActivityRef.current;
+
+      if (elapsed >= IDLE_TIMEOUT_MS) {
+        console.warn("[Security] Session timed out due to 15 minutes of inactivity.");
+        logSecurityEvent({
+          eventType: "SESSION_TIMEOUT",
+          userId: user.id,
+          userEmail: user.email,
+          role: profile?.role,
+          severity: "INFO",
+          details: { idleDurationMinutes: 15 },
+        });
+
+        toast.warning("Session Expired: You were logged out due to 15 minutes of inactivity.");
+        signOut("SESSION_TIMEOUT");
+      }
+    }, 30000); // Check every 30 seconds
+
+    return () => {
+      events.forEach((evt) => window.removeEventListener(evt, handleUserActivity));
+      clearInterval(idleChecker);
+    };
+  }, [user, profile]);
+
+  /**
+   * Strict Login Enforcement:
+   * - Validates rate-limiting to block brute-force attacks
+   * - Performs strict credential matching (no auto-bypass)
+   * - Returns generic error messages
+   * - Centralized security audit logging
+   */
+  async function signIn(email: string, password: string, remember: boolean = true) {
     setIsLoading(true);
+    const cleanEmail = email.trim().toLowerCase();
+
+    // 1. Check Rate-Limiting & Brute Force Lockout
+    const rateLimit = getRateLimitStatus(cleanEmail);
+    if (rateLimit.isLocked) {
+      setIsLoading(false);
+      logSecurityEvent({
+        eventType: "RATE_LIMIT_LOCKOUT",
+        userEmail: cleanEmail,
+        severity: "HIGH",
+        details: { remainingSeconds: rateLimit.remainingSeconds },
+      });
+      return {
+        error: new Error(
+          `Security Alert: Too many failed login attempts. Please wait ${rateLimit.remainingSeconds} seconds before retrying.`,
+        ),
+      };
+    }
+
     try {
-      // 1. Attempt Supabase Auth sign in
+      // 2. Attempt Supabase Auth Sign In
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: cleanEmail,
         password,
       });
 
       if (!error && data?.user) {
+        resetRateLimit(cleanEmail);
         setUser(data.user);
         setSession(data.session);
         const p = await fetchUserProfile(data.user);
         setProfile(p);
+        saveProfileToStorage(p, remember);
+        setRememberMe(remember);
+
+        logSecurityEvent({
+          eventType: "LOGIN_SUCCESS",
+          userEmail: cleanEmail,
+          userId: data.user.id,
+          role: p?.role || "STUDENT",
+          severity: "INFO",
+          details: { method: "SUPABASE_AUTH" },
+        });
+
         setIsLoading(false);
         return { error: null, user: data.user };
       }
 
-      // 2. Check for demo shortcuts & hardcoded credentials
-      const cleanEmail = email.trim().toLowerCase();
-      const inferredRole: AppRole = cleanEmail.includes("admin")
-        ? "ADMIN"
-        : cleanEmail.includes("driver")
-          ? "DRIVER"
-          : "STUDENT";
+      // 3. Check for Seeded Initial System Accounts (Exact password verification required)
+      const systemAccount = VALID_SYSTEM_ACCOUNTS[cleanEmail];
+      if (systemAccount && systemAccount.pass === password) {
+        resetRateLimit(cleanEmail);
+        const targetUuid = DEMO_UUIDS[systemAccount.role];
 
-      const inferredName =
-        inferredRole === "ADMIN"
-          ? "UTS Operations Administrator"
-          : inferredRole === "DRIVER"
-            ? "Muhammad Tariq (Assigned Route 01 Driver)"
-            : cleanEmail.split("@")[0] || "Ahmed Hussain";
+        const syntheticProfile: UserProfile = {
+          id: targetUuid,
+          email: cleanEmail,
+          full_name: systemAccount.name,
+          phone: "03124567891",
+          role: systemAccount.role,
+          institution: systemAccount.institution || (systemAccount.role === "STUDENT" ? "National University of Sciences & Technology (NUST)" : null),
+          license_no: systemAccount.license || (systemAccount.role === "DRIVER" ? "ICT-PSV-99214" : null),
+          driverApplicationStatus: systemAccount.role === "DRIVER" ? "APPROVED" : null,
+          lastLoginAt: new Date().toISOString(),
+        };
 
-      const targetUuid = DEMO_UUIDS[inferredRole];
+        const synUser = createSyntheticUser(syntheticProfile);
+        setUser(synUser);
+        setProfile(syntheticProfile);
+        saveProfileToStorage(syntheticProfile, remember);
+        setRememberMe(remember);
 
-      // Fallback synthetic session
-      const syntheticProfile: UserProfile = {
-        id: targetUuid,
-        email: email.trim(),
-        full_name: inferredName,
-        phone: "03124567891",
-        role: inferredRole,
-        institution:
-          inferredRole === "STUDENT" ? "National University of Sciences & Technology (NUST)" : null,
-        license_no: inferredRole === "DRIVER" ? "ICT-PSV-99214" : null,
-        driverApplicationStatus: inferredRole === "DRIVER" ? "APPROVED" : null,
-      };
+        logSecurityEvent({
+          eventType: "LOGIN_SUCCESS",
+          userEmail: cleanEmail,
+          userId: synUser.id,
+          role: systemAccount.role,
+          severity: "INFO",
+          details: { method: "SYSTEM_SEEDED_ACCOUNT" },
+        });
 
-      const syntheticUser = createSyntheticUser(syntheticProfile);
-      setUser(syntheticUser);
-      setProfile(syntheticProfile);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(syntheticProfile));
+        setIsLoading(false);
+        return { error: null, user: synUser };
+      }
+
+      // 4. Strict Authentication Failure
+      const failureStatus = recordFailedLoginAttempt(cleanEmail);
+      logSecurityEvent({
+        eventType: "LOGIN_FAILED",
+        userEmail: cleanEmail,
+        severity: "WARNING",
+        details: { attempts: failureStatus.attempts },
+      });
+
       setIsLoading(false);
 
-      return { error: null, user: syntheticUser };
+      if (failureStatus.isLocked) {
+        return {
+          error: new Error(
+            `Account temporarily locked due to ${failureStatus.attempts} failed attempts. Please try again in ${failureStatus.remainingSeconds} seconds.`,
+          ),
+        };
+      }
+
+      // Generic error message to prevent user enumeration
+      return {
+        error: new Error("Invalid credentials. Please verify your email and password."),
+      };
     } catch (err) {
-      console.warn("SignIn caught exception, setting active demo session:", err);
-      const fallbackRole: AppRole = email.toLowerCase().includes("admin")
-        ? "ADMIN"
-        : email.toLowerCase().includes("driver")
-          ? "DRIVER"
-          : "STUDENT";
-
-      const p: UserProfile = {
-        id: DEMO_UUIDS[fallbackRole],
-        email: email.trim(),
-        full_name:
-          fallbackRole === "ADMIN"
-            ? "UTS Operations Administrator"
-            : fallbackRole === "DRIVER"
-              ? "Muhammad Tariq"
-              : "Ahmed Hussain",
-        phone: "03124567891",
-        role: fallbackRole,
-        institution: "National University of Sciences & Technology (NUST)",
-        driverApplicationStatus: fallbackRole === "DRIVER" ? "APPROVED" : null,
-      };
-      setUser(createSyntheticUser(p));
-      setProfile(p);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
+      recordFailedLoginAttempt(cleanEmail);
+      logSecurityEvent({
+        eventType: "LOGIN_FAILED",
+        userEmail: cleanEmail,
+        severity: "HIGH",
+        details: { exception: String(err) },
+      });
       setIsLoading(false);
-      return { error: null, user: p };
+      return { error: new Error("Invalid credentials. Please verify your email and password.") };
     }
   }
 
+  // Demo Login Quick-Access (Pre-authenticated development & staging portals)
   async function loginAsDemo(demoRole: AppRole) {
     setIsLoading(true);
     const email =
       demoRole === "ADMIN"
-        ? "admin@uts.com.pk"
+        ? "admin@gmail.com"
         : demoRole === "DRIVER"
-          ? "driver@uts.com.pk"
-          : "student@nust.edu.pk";
+          ? "driver@gmail.com"
+          : "student@gmail.com";
 
     const name =
       demoRole === "ADMIN"
         ? "UTS Operations Administrator"
         : demoRole === "DRIVER"
           ? "Muhammad Tariq (Assigned Driver)"
-          : "Ahmed Hussain (NUST Student)";
+          : "Ahmed Hussain (Registered Student)";
 
     const targetUuid = DEMO_UUIDS[demoRole];
 
@@ -395,12 +560,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         demoRole === "STUDENT" ? "National University of Sciences & Technology (NUST)" : null,
       license_no: demoRole === "DRIVER" ? "ICT-PSV-99214" : null,
       driverApplicationStatus: demoRole === "DRIVER" ? "APPROVED" : null,
+      lastLoginAt: new Date().toISOString(),
     };
 
     const synUser = createSyntheticUser(demoProfile);
     setUser(synUser);
     setProfile(demoProfile);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(demoProfile));
+    saveProfileToStorage(demoProfile, true);
+
+    logSecurityEvent({
+      eventType: "LOGIN_SUCCESS",
+      userEmail: email,
+      userId: synUser.id,
+      role: demoRole,
+      severity: "INFO",
+      details: { mode: "DEMO_PORTAL_SWITCH" },
+    });
 
     // Sync to Supabase in background
     try {
@@ -414,23 +589,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user_id: synUser.id,
         role: demoRole,
       });
-      if (demoRole === "STUDENT") {
-        await supabase.from("students").upsert({
-          profile_id: synUser.id,
-          full_name: name,
-          email,
-          phone: "03124567891",
-          institution: "National University of Sciences & Technology (NUST)",
-        });
-      } else if (demoRole === "DRIVER") {
-        await supabase.from("drivers").upsert({
-          profile_id: synUser.id,
-          full_name: name,
-          phone: "03124567891",
-          license_no: "ICT-PSV-99214",
-          status: "ACTIVE",
-        });
-      }
     } catch (e) {
       console.warn("Background DB sync notice:", e);
     }
@@ -465,6 +623,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
           : "00000000-0000-4000-a000-000000000001");
+
       const newProfile: UserProfile = {
         id: userId,
         email: email.trim(),
@@ -472,6 +631,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         phone: data.phone || "03124567891",
         role: assignedRole,
         institution: data.institution || "National University of Sciences & Technology (NUST)",
+        lastLoginAt: new Date().toISOString(),
       };
 
       try {
@@ -500,7 +660,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setUser(createSyntheticUser(newProfile));
       setProfile(newProfile);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newProfile));
+      saveProfileToStorage(newProfile, true);
+
+      logSecurityEvent({
+        eventType: "LOGIN_SUCCESS",
+        userEmail: email.trim(),
+        userId,
+        role: "STUDENT",
+        severity: "INFO",
+        details: { event: "STUDENT_REGISTRATION" },
+      });
+
       setIsLoading(false);
       return { error: null, user: authData?.user || newProfile };
     } catch (err) {
@@ -514,7 +684,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function submitDriverApplication(data: DriverApplicationSubmission) {
     setIsLoading(true);
     try {
-      // 1. Create auth account if password provided
       let userId: string | null = null;
       if (data.password) {
         const { data: authData } = await supabase.auth.signUp({
@@ -532,7 +701,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         userId = authData?.user?.id || null;
       }
 
-      // 2. Insert into driver_applications with status PENDING_APPROVAL
       const { data: appData, error: appError } = await supabase
         .from("driver_applications")
         .insert({
@@ -568,7 +736,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       setUser(createSyntheticUser(pendingProfile));
       setProfile(pendingProfile);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(pendingProfile));
+      saveProfileToStorage(pendingProfile, true);
       setIsLoading(false);
 
       return { error: null, applicationId: appData?.id };
@@ -579,14 +747,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  async function signOut() {
+  async function signOut(reason: string = "USER_LOGOUT") {
     setIsLoading(true);
     try {
+      if (user) {
+        logSecurityEvent({
+          eventType: "LOGOUT",
+          userId: user.id,
+          userEmail: user.email,
+          role: profile?.role,
+          severity: "INFO",
+          details: { reason },
+        });
+      }
       await supabase.auth.signOut();
     } catch (e) {
       console.warn("SignOut notice:", e);
     }
-    localStorage.removeItem(STORAGE_KEY);
+    saveProfileToStorage(null, true);
     setUser(null);
     setSession(null);
     setProfile(null);
@@ -611,6 +789,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isDriver,
         isStudent,
         driverApplicationStatus,
+        rememberMe,
+        setRememberMe,
         signIn,
         signUp,
         submitDriverApplication,

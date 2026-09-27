@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   CheckCircle2,
   XCircle,
@@ -32,7 +32,15 @@ import {
   UserCheck,
   Calendar,
   Filter,
+  Radio,
+  Compass,
 } from "lucide-react";
+import {
+  DriverGpsBroadcaster,
+  type BusLocationPayload,
+  type GeolocationStatus,
+  type ChannelStatus,
+} from "@/lib/realtime-tracking";
 import { PublicLayout } from "@/components/site/PublicLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,7 +76,7 @@ import {
   UTS_BROADCAST_EVENT_KEY,
   type BroadcastAlertItem,
 } from "@/lib/admin-operations-store";
-import { toast } from "sonner";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 
 export const Route = createFileRoute("/driver/dashboard")({
   head: () => ({
@@ -81,7 +89,11 @@ export const Route = createFileRoute("/driver/dashboard")({
       },
     ],
   }),
-  component: DriverDashboardPage,
+  component: () => (
+    <ProtectedRoute allowedRoles={["DRIVER", "ADMIN"]}>
+      <DriverDashboardPage />
+    </ProtectedRoute>
+  ),
 });
 
 type RouteLifecycle = "NOT_STARTED" | "ACTIVE" | "COMPLETED";
@@ -339,6 +351,64 @@ export function DriverDashboardPage() {
   const [delayReason, setDelayReason] = useState("Heavy traffic congestion on Kashmir Highway");
   const [submittingDelay, setSubmittingDelay] = useState(false);
 
+  // Live GPS Broadcast State (Supabase Realtime Broadcast — Zero DB Bottlenecks)
+  const broadcasterRef = useRef<DriverGpsBroadcaster | null>(null);
+  const [isBroadcasting, setIsBroadcasting] = useState(false);
+  const [geoStatus, setGeoStatus] = useState<GeolocationStatus>("IDLE");
+  const [channelStatus, setChannelStatus] = useState<ChannelStatus>("DISCONNECTED");
+  const [currentGpsPayload, setCurrentGpsPayload] = useState<BusLocationPayload | null>(null);
+  const [broadcastSimulation, setBroadcastSimulation] = useState(false);
+
+  const startGpsBroadcast = (forceSimulation = false) => {
+    if (broadcasterRef.current) {
+      broadcasterRef.current.stopBroadcasting();
+    }
+
+    const broadcaster = new DriverGpsBroadcaster({
+      routeId,
+      busId: "v1",
+      busCode: "UTS-CST-104",
+      driverName: profile?.full_name || "Muhammad Tariq",
+      routeName,
+      shiftId,
+      onLocation: (payload) => {
+        setCurrentGpsPayload(payload);
+      },
+      onError: (err) => {
+        console.warn("[DriverDashboard] GPS error:", err);
+      },
+      onStatusChange: (gStatus, cStatus) => {
+        setGeoStatus(gStatus);
+        setChannelStatus(cStatus);
+      },
+    });
+
+    broadcasterRef.current = broadcaster;
+    broadcaster.startBroadcasting({ simulate: forceSimulation });
+    setIsBroadcasting(true);
+    setBroadcastSimulation(forceSimulation);
+    toast.success("Live GPS Telemetry Broadcast activated on Supabase Realtime channel.");
+  };
+
+  const stopGpsBroadcast = () => {
+    if (broadcasterRef.current) {
+      broadcasterRef.current.stopBroadcasting();
+      broadcasterRef.current = null;
+    }
+    setIsBroadcasting(false);
+    setGeoStatus("IDLE");
+    setChannelStatus("DISCONNECTED");
+    toast.info("Live GPS Telemetry Broadcast stopped.");
+  };
+
+  useEffect(() => {
+    return () => {
+      if (broadcasterRef.current) {
+        broadcasterRef.current.stopBroadcasting();
+      }
+    };
+  }, []);
+
   // Route History
   const [routeHistory, setRouteHistory] = useState([
     {
@@ -523,8 +593,11 @@ export function DriverDashboardPage() {
       "MORNING",
     );
 
+    // Auto-start live GPS broadcast over Supabase Realtime channel
+    startGpsBroadcast(false);
+
     toast.success(
-      `✓ Shift Run Started at ${nowStr}! Onboard alert dispatched & Driver Attendance confirmed on Admin Operations Desk.`,
+      `✓ Shift Run Started at ${nowStr}! Onboard alert dispatched & Live GPS Telemetry Broadcasting.`,
     );
   };
 
@@ -690,6 +763,9 @@ export function DriverDashboardPage() {
 
     // Record shift end in driver attendance store
     recordDriverShiftEnd(user?.id || profile?.id || "d1");
+
+    // Stop live GPS broadcast
+    stopGpsBroadcast();
 
     const totalAbsent = finalPassengers.filter((p) => p.status === "ABSENT").length;
     const totalPresent = finalPassengers.filter((p) => p.status === "PRESENT").length;
@@ -1053,6 +1129,124 @@ export function DriverDashboardPage() {
 
       {/* OPERATIONAL METRICS BAR & BROADCAST ALERTS */}
       <section className="container-page py-6 space-y-4">
+        {/* REALTIME GPS BROADCASTER CARD (Supabase Realtime Broadcast — Zero DB Bottlenecks) */}
+        <div className="card-elevated p-5 border border-primary/20 bg-gradient-to-r from-card via-card to-primary/5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                isBroadcasting
+                  ? "bg-emerald-500/15 text-emerald-600 ring-2 ring-emerald-500/30 animate-pulse"
+                  : "bg-muted text-muted-foreground"
+              }`}>
+                <Radio className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-sm font-bold text-foreground">
+                    Supabase Realtime GPS Broadcaster
+                  </h3>
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] gap-1 ${
+                      isBroadcasting
+                        ? "bg-emerald-500/15 text-emerald-600 border-emerald-500/30 font-mono"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${isBroadcasting ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground"}`} />
+                    {isBroadcasting
+                      ? broadcastSimulation
+                        ? "BROADCASTING (Simulation)"
+                        : "BROADCASTING (Live Device GPS)"
+                      : "BROADCAST STANDBY"}
+                  </Badge>
+                  <Badge variant="outline" className="bg-primary/10 text-primary text-[10px] font-mono">
+                    Channel: shift-route-{routeId}
+                  </Badge>
+                  <Badge variant="outline" className="bg-muted text-[10px]">
+                    Zero DB Writes
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Stream coordinates directly to students & operations desk via ephemeral WebSocket broadcast.
+                </p>
+              </div>
+            </div>
+
+            {/* Broadcast Control Buttons */}
+            <div className="flex items-center gap-2">
+              {!isBroadcasting ? (
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() => startGpsBroadcast(false)}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold"
+                  >
+                    <Radio className="mr-1.5 h-3.5 w-3.5" /> Start Live GPS
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => startGpsBroadcast(true)}
+                    className="text-xs"
+                    title="Simulate route movement for testing on laptop"
+                  >
+                    Simulate Stream
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={stopGpsBroadcast}
+                  className="text-xs font-semibold"
+                >
+                  <Square className="mr-1.5 h-3.5 w-3.5 fill-current" /> Stop Broadcast
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {/* Telemetry Metric Readout when broadcasting */}
+          {isBroadcasting && currentGpsPayload && (
+            <div className="mt-4 pt-3 border-t border-border grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="bg-background/60 p-2 rounded-lg border border-border">
+                <span className="text-[10px] text-muted-foreground block uppercase font-mono">Latitude / Longitude</span>
+                <span className="font-mono font-bold text-foreground">
+                  {currentGpsPayload.lat.toFixed(4)}, {currentGpsPayload.lng.toFixed(4)}
+                </span>
+              </div>
+              <div className="bg-background/60 p-2 rounded-lg border border-border">
+                <span className="text-[10px] text-muted-foreground block uppercase font-mono">Telemetry Speed</span>
+                <span className="font-mono font-bold text-emerald-600">
+                  {currentGpsPayload.speed} km/h
+                </span>
+              </div>
+              <div className="bg-background/60 p-2 rounded-lg border border-border">
+                <span className="text-[10px] text-muted-foreground block uppercase font-mono">GPS Accuracy</span>
+                <span className="font-mono font-bold text-primary">
+                  ±{currentGpsPayload.accuracy}m
+                </span>
+              </div>
+              <div className="bg-background/60 p-2 rounded-lg border border-border">
+                <span className="text-[10px] text-muted-foreground block uppercase font-mono">Channel Status</span>
+                <span className="font-mono font-bold text-emerald-600">
+                  {channelStatus}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Geolocation Denied Helper */}
+          {geoStatus === "PERMISSION_DENIED" && (
+            <div className="mt-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-xs flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>
+                Browser Geolocation permission was denied. Switched to high-fidelity waypoint simulation. Enable location in browser URL bar for hardware GPS.
+              </span>
+            </div>
+          )}
+        </div>
         {/* 1. ACTIVE ADMIN BROADCAST ALERTS (Thunderstorm / Emergency notices) */}
         {broadcasts.filter((b) => b.active && (b.targetAudience === "ALL" || b.targetAudience === "DRIVERS")).map((b) => (
           <div

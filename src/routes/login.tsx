@@ -35,6 +35,9 @@ import {
 import { useAuth, type AppRole } from "@/hooks/use-auth";
 import { toast } from "sonner";
 
+import { Checkbox } from "@/components/ui/checkbox";
+import { getRateLimitStatus } from "@/lib/security-service";
+
 export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
@@ -59,6 +62,8 @@ function LoginPage() {
     isDriver,
     isStudent,
     driverApplicationStatus,
+    rememberMe,
+    setRememberMe,
     signIn,
     signUp,
     submitDriverApplication,
@@ -70,8 +75,34 @@ function LoginPage() {
   // Login form state
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
+  const [rememberMeLocal, setRememberMeLocal] = useState(rememberMe);
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [lockoutTimer, setLockoutTimer] = useState<number>(0);
+
+  // Check rate limit timer on email change or mount
+  useEffect(() => {
+    if (loginEmail) {
+      const status = getRateLimitStatus(loginEmail);
+      if (status.isLocked) {
+        setLockoutTimer(status.remainingSeconds);
+      }
+    }
+  }, [loginEmail]);
+
+  useEffect(() => {
+    if (lockoutTimer <= 0) return;
+    const interval = setInterval(() => {
+      setLockoutTimer((prev) => {
+        if (prev <= 1) {
+          setLoginError(null);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lockoutTimer]);
 
   // Student Signup form state
   const [studentName, setStudentName] = useState("");
@@ -117,17 +148,33 @@ function LoginPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
+
+    if (lockoutTimer > 0) {
+      toast.error(`Please wait ${lockoutTimer}s before retrying.`);
+      return;
+    }
+
     setLoginLoading(true);
 
-    const { error } = await signIn(loginEmail, loginPassword);
+    const { error } = await signIn(loginEmail, loginPassword, rememberMeLocal);
     setLoginLoading(false);
 
     if (error) {
-      setLoginError(error.message || "Failed to sign in. Please check your credentials.");
-      toast.error(error.message || "Sign in failed");
+      setLoginError(error.message || "Invalid credentials. Please verify your email and password.");
+      const rateCheck = getRateLimitStatus(loginEmail);
+      if (rateCheck.isLocked) {
+        setLockoutTimer(rateCheck.remainingSeconds);
+      }
+      toast.error(error.message || "Authentication failed");
     } else {
       toast.success("Welcome back to UTS Smart Transport!");
     }
+  };
+
+  const fillCredentials = (email: string, pass: string) => {
+    setLoginEmail(email);
+    setLoginPassword(pass);
+    setLoginError(null);
   };
 
   const handleStudentSignup = async (e: React.FormEvent) => {
@@ -344,12 +391,22 @@ function LoginPage() {
 
                 {/* SIGN IN TAB */}
                 <TabsContent value="signin" className="mt-6 space-y-4">
-                  {loginError && (
+                  {lockoutTimer > 0 ? (
+                    <div className="flex items-center gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive animate-pulse">
+                      <ShieldAlert className="h-5 w-5 shrink-0" />
+                      <div>
+                        <strong className="block font-semibold">Security Brute-Force Lockout Active</strong>
+                        <span className="text-xs">
+                          Too many failed authentication attempts. Access locked for <strong>{lockoutTimer}s</strong>.
+                        </span>
+                      </div>
+                    </div>
+                  ) : loginError ? (
                     <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3.5 text-sm text-destructive">
                       <AlertCircle className="h-4 w-4 shrink-0" />
                       <span>{loginError}</span>
                     </div>
-                  )}
+                  ) : null}
 
                   <form onSubmit={handleLogin} className="space-y-4">
                     <div className="space-y-2">
@@ -364,6 +421,7 @@ function LoginPage() {
                           value={loginEmail}
                           onChange={(e) => setLoginEmail(e.target.value)}
                           required
+                          disabled={loginLoading || lockoutTimer > 0}
                         />
                       </div>
                     </div>
@@ -382,17 +440,81 @@ function LoginPage() {
                           value={loginPassword}
                           onChange={(e) => setLoginPassword(e.target.value)}
                           required
+                          disabled={loginLoading || lockoutTimer > 0}
                         />
                       </div>
                     </div>
 
-                    <Button type="submit" className="w-full" size="lg" disabled={loginLoading}>
-                      {loginLoading ? "Signing in..." : "Sign In to Portal"}
+                    {/* Remember Me & Idle Timeout Note */}
+                    <div className="flex items-center justify-between py-1">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="remember-me"
+                          checked={rememberMeLocal}
+                          onCheckedChange={(checked) => setRememberMeLocal(!!checked)}
+                        />
+                        <label
+                          htmlFor="remember-me"
+                          className="text-xs font-medium leading-none text-foreground peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
+                        >
+                          Remember Me
+                        </label>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground">15 min idle auto-logout</span>
+                    </div>
+
+                    <Button
+                      type="submit"
+                      className="w-full"
+                      size="lg"
+                      disabled={loginLoading || lockoutTimer > 0}
+                    >
+                      {loginLoading
+                        ? "Verifying credentials..."
+                        : lockoutTimer > 0
+                          ? `Locked (${lockoutTimer}s)`
+                          : "Sign In to Portal"}
                     </Button>
                   </form>
 
+                  {/* Seeded Initial Accounts Quick Auto-Fill */}
+                  <div className="mt-6 rounded-xl border border-border bg-muted/30 p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                        <ShieldCheck className="h-3.5 w-3.5 text-primary" /> Personal & Test Credentials
+                      </p>
+                      <span className="text-[10px] text-muted-foreground">Click to fill</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5 text-left">
+                      <button
+                        type="button"
+                        onClick={() => fillCredentials("admin@gmail.com", "AdminUTS@2026!SecureKey#")}
+                        className="p-2 rounded-lg border border-border/80 bg-background hover:border-primary/50 text-[11px] transition-colors"
+                      >
+                        <strong className="block text-foreground truncate">Admin Desk</strong>
+                        <span className="text-[10px] text-muted-foreground font-mono truncate block">admin@gmail.com</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => fillCredentials("driver@gmail.com", "UtsDriver@2026")}
+                        className="p-2 rounded-lg border border-border/80 bg-background hover:border-primary/50 text-[11px] transition-colors"
+                      >
+                        <strong className="block text-foreground truncate">Driver</strong>
+                        <span className="text-[10px] text-muted-foreground font-mono truncate block">driver@gmail.com</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => fillCredentials("student@gmail.com", "StudentUTS@2026")}
+                        className="p-2 rounded-lg border border-border/80 bg-background hover:border-primary/50 text-[11px] transition-colors"
+                      >
+                        <strong className="block text-foreground truncate">Student</strong>
+                        <span className="text-[10px] text-muted-foreground font-mono truncate block">student@gmail.com</span>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* 1-Click Instant Demo Portals */}
-                  <div className="mt-8 border-t border-border pt-6">
+                  <div className="mt-6 border-t border-border pt-4">
                     <div className="flex items-center justify-between">
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                         Instant 1-Click Demo Portals
@@ -497,7 +619,7 @@ function LoginPage() {
                             <Input
                               id="student-email"
                               type="email"
-                              placeholder="ahmed@nust.edu.pk"
+                              placeholder="ahmed@gmail.com"
                               className="pl-9"
                               value={studentEmail}
                               onChange={(e) => setStudentEmail(e.target.value)}
@@ -611,7 +733,7 @@ function LoginPage() {
                             <Input
                               id="driver-email"
                               type="email"
-                              placeholder="tariq@uts.com.pk"
+                              placeholder="tariq.driver@gmail.com"
                               className="pl-9"
                               value={driverEmail}
                               onChange={(e) => setDriverEmail(e.target.value)}

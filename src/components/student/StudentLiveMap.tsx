@@ -1,7 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Bus, MapPin, Play, Pause, RotateCcw, Zap, Loader2 } from "lucide-react";
+import { Bus, MapPin, Play, Pause, RotateCcw, Zap, Loader2, Radio, CheckCircle2, AlertTriangle, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  StudentLocationListener,
+  type BusLocationPayload,
+  type ChannelStatus,
+  ISLAMABAD_ROUTE_01_WAYPOINTS,
+} from "@/lib/realtime-tracking";
 
 export interface StudentMapStop {
   id: string;
@@ -14,38 +20,39 @@ export interface StudentMapStop {
 }
 
 interface StudentLiveMapProps {
+  routeId?: string;
+  routeName?: string;
   customStopName?: string;
   customPickupTime?: string;
 }
 
 export function StudentLiveMap({
-  customStopName = "G-10 Markaz Stop",
+  routeId = "r1",
+  routeName = "NUST Morning Route 01 (Islamabad West)",
+  customStopName = "G-10 Markaz Roundabout",
   customPickupTime = "07:30 AM",
 }: StudentLiveMapProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<any>(null);
   const busMarkerRef = useRef<any>(null);
   const leafletModuleRef = useRef<any>(null);
+  const listenerRef = useRef<StudentLocationListener | null>(null);
 
   const [isClient, setIsClient] = useState(false);
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [isSimulating, setIsSimulating] = useState(true);
-  const [busProgressIndex, setBusProgressIndex] = useState(1);
+  const [isLiveTelemetryActive, setIsLiveTelemetryActive] = useState(false);
+  const [channelStatus, setChannelStatus] = useState<ChannelStatus>("CONNECTING");
+  const [lastTelemetry, setLastTelemetry] = useState<BusLocationPayload | null>(null);
   const [speed, setSpeed] = useState(38);
   const [etaMinutes, setEtaMinutes] = useState(6);
   const [distanceKm, setDistanceKm] = useState(2.3);
+  const [isSimulating, setIsSimulating] = useState(true);
+
+  // Student assigned stop coordinates
+  const studentStopCoords: [number, number] = [33.6844, 73.0187];
 
   // Islamabad Route Coordinates (NUST Morning Route 01)
-  const routeWaypoints: [number, number][] = [
-    [33.68, 73.023], // Start: I-10 / G-10 Border
-    [33.6844, 73.0187], // Stop 1: G-10 Markaz Roundabout (Student pickup)
-    [33.689, 73.013], // Stop 2: G-10/4 Main Boulevard
-    [33.6995, 73.0035], // Stop 3: F-11 Markaz
-    [33.711, 72.992], // Stop 4: E-11 Sector Entry
-    [33.675, 72.995], // En route Kashmir Hwy
-    [33.652, 72.998], // Stop 5: NUST Gate 1
-    [33.6425, 72.9905], // Destination: NUST H-12 Campus Main
-  ];
+  const routeWaypoints: [number, number][] = ISLAMABAD_ROUTE_01_WAYPOINTS;
 
   // Route Stops
   const stops: StudentMapStop[] = [
@@ -71,10 +78,26 @@ export function StudentLiveMap({
     },
   ];
 
+  // Calculate distance in kilometers using Haversine formula
+  function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371; // Earth's radius in km
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return Number((R * c).toFixed(1));
+  }
+
   useEffect(() => {
     setIsClient(true);
   }, []);
 
+  // 1. Leaflet Map Initialization
   useEffect(() => {
     if (!isClient || !mapContainerRef.current) return;
     if (mapInstanceRef.current) return;
@@ -83,33 +106,31 @@ export function StudentLiveMap({
 
     async function initLeaflet() {
       try {
-        // Dynamic import to prevent SSR "window is not defined" error
         const L = (await import("leaflet")).default || (await import("leaflet"));
         leafletModuleRef.current = L;
 
         if (!isSubscribed || !mapContainerRef.current) return;
 
-        // Clean up any stale container references
         if ((mapContainerRef.current as any)._leaflet_id) {
           (mapContainerRef.current as any)._leaflet_id = null;
         }
 
-        // 1. Initialize Map centered on student stop
+        // Initialize Map centered on student stop
         const map = L.map(mapContainerRef.current, {
-          center: [33.6844, 73.0187],
+          center: studentStopCoords,
           zoom: 13,
           zoomControl: false,
         });
 
-        // 2. OpenStreetMap / CartoDB Voyager TileLayer for clean modern UI
+        // CartoDB Voyager TileLayer
         L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-          attribution: '&copy; <a href="https://openstreetmap.org">OSM</a> | UTS Smart Tracking',
+          attribution: '&copy; <a href="https://openstreetmap.org">OSM</a> | UTS Realtime Broadcast',
           maxZoom: 19,
         }).addTo(map);
 
         L.control.zoom({ position: "bottomright" }).addTo(map);
 
-        // 3. Draw Route Polyline
+        // Draw Route Polyline
         const routeLine = L.polyline(routeWaypoints, {
           color: "#0094DD",
           weight: 6,
@@ -118,14 +139,13 @@ export function StudentLiveMap({
           lineJoin: "round",
         }).addTo(map);
 
-        // Subtle casing line
         L.polyline(routeWaypoints, {
           color: "#1C1565",
           weight: 9,
           opacity: 0.25,
         }).addTo(map);
 
-        // 4. Add Custom Markers for Stops
+        // Add Stop Markers
         stops.forEach((st, idx) => {
           let iconHtml = "";
           if (st.isStudentStop) {
@@ -162,27 +182,25 @@ export function StudentLiveMap({
 
           const marker = L.marker([st.lat, st.lng], { icon: markerIcon }).addTo(map);
 
-          const popupContent = `
+          marker.bindPopup(`
             <div style="font-family: inherit; padding: 4px;">
               <div style="font-weight: 700; font-size: 13px; color: #1C1565; margin-bottom: 2px;">
-                ${st.isStudentStop ? "⭐ Your Pickup Stop: " : ""}${st.name}
+                ${st.isStudentStop ? "⭐ Your Assigned Pickup Stop: " : ""}${st.name}
               </div>
               <div style="font-size: 11px; color: #475569;">
-                Scheduled Time: <strong>${st.time}</strong>
+                Scheduled Pickup: <strong>${st.time}</strong>
               </div>
               ${
                 st.isStudentStop
-                  ? '<div style="margin-top: 4px; font-size: 10px; color: #059669; font-weight: 600;">Assigned Stop for Ahmed Hussain</div>'
+                  ? '<div style="margin-top: 4px; font-size: 10px; color: #059669; font-weight: 600;">Verified Transit Node</div>'
                   : ""
               }
             </div>
-          `;
-
-          marker.bindPopup(popupContent);
+          `);
         });
 
-        // 5. Add Live Bus Marker
-        const initialBusPos: [number, number] = routeWaypoints[1] || [33.6844, 73.0187];
+        // Add Live Bus Marker
+        const initialBusPos: [number, number] = routeWaypoints[1] || studentStopCoords;
         const busIconHtml = `
           <div class="relative flex items-center justify-center">
             <span class="absolute h-10 w-10 rounded-full bg-orange-500/40 animate-ping"></span>
@@ -202,9 +220,9 @@ export function StudentLiveMap({
         const busMarker = L.marker(initialBusPos, { icon: busIcon, zIndexOffset: 1000 }).addTo(map);
         busMarker.bindPopup(`
           <div style="padding: 4px;">
-            <div style="font-weight: 700; color: #1C1565; font-size: 13px;">Coaster UTS-CST-104</div>
+            <div style="font-weight: 700; color: #1C1565; font-size: 13px;">UTS-CST-104 (Toyota Coaster)</div>
             <div style="font-size: 11px; color: #475569;">Driver: <strong>Muhammad Tariq</strong></div>
-            <div style="font-size: 11px; color: #E77A18; font-weight: 600;">Status: On Route • Speed: 38 km/h</div>
+            <div style="font-size: 11px; color: #E77A18; font-weight: 600;">Live Telemetry via Supabase Realtime Broadcast</div>
           </div>
         `);
 
@@ -214,7 +232,7 @@ export function StudentLiveMap({
 
         map.fitBounds(routeLine.getBounds(), { padding: [40, 40] });
       } catch (err) {
-        console.warn("Leaflet initialization notice:", err);
+        console.warn("[StudentLiveMap] Leaflet initialization notice:", err);
       }
     }
 
@@ -229,35 +247,93 @@ export function StudentLiveMap({
     };
   }, [isClient, customStopName, customPickupTime]);
 
-  // Live Vehicle Telemetry Simulation
+  // 2. Supabase Realtime Broadcast Listener (Zero Database Writes)
   useEffect(() => {
-    if (!isSimulating || !mapInstanceRef.current || !busMarkerRef.current) return;
+    if (!isClient) return;
 
-    const timer = setInterval(() => {
-      setBusProgressIndex((prev) => {
-        const nextIdx = (prev + 1) % routeWaypoints.length;
-        const targetPos = routeWaypoints[nextIdx];
+    console.log(`[StudentLiveMap] Connecting to Realtime Broadcast channel: shift-route-${routeId}`);
 
-        if (busMarkerRef.current && targetPos) {
-          busMarkerRef.current.setLatLng(targetPos);
+    const listener = new StudentLocationListener({
+      routeId,
+      onLocation: (payload) => {
+        setIsLiveTelemetryActive(true);
+        setLastTelemetry(payload);
+        setSpeed(payload.speed || 38);
+
+        // Smoothly update existing Leaflet bus marker position
+        if (busMarkerRef.current && payload.lat && payload.lng) {
+          busMarkerRef.current.setLatLng([payload.lat, payload.lng]);
+
+          // Dynamically compute distance & ETA to student's pickup stop
+          const dist = calculateDistanceKm(
+            payload.lat,
+            payload.lng,
+            studentStopCoords[0],
+            studentStopCoords[1],
+          );
+          setDistanceKm(dist);
+
+          const estimatedMins = Math.max(1, Math.round((dist / Math.max(25, payload.speed || 35)) * 60));
+          setEtaMinutes(estimatedMins);
+
+          // Update popup content with fresh telemetry
+          busMarkerRef.current.setPopupContent(`
+            <div style="padding: 4px; font-family: inherit;">
+              <div style="font-weight: 700; color: #1C1565; font-size: 13px;">${payload.busCode || "UTS-CST-104"}</div>
+              <div style="font-size: 11px; color: #475569;">Driver: <strong>${payload.driverName || "Muhammad Tariq"}</strong></div>
+              <div style="font-size: 11px; color: #059669; font-weight: 600;">
+                Speed: ${payload.speed} km/h • ±${payload.accuracy || 5}m Accuracy
+              </div>
+              <div style="font-size: 10px; color: #64748b; margin-top: 2px;">
+                Updated: ${new Date(payload.timestamp).toLocaleTimeString()}
+              </div>
+            </div>
+          `);
         }
+      },
+      onStatusChange: (status) => {
+        setChannelStatus(status);
+        console.log(`[StudentLiveMap] Realtime Channel Status:`, status);
+      },
+    });
 
-        const newSpeed = Math.floor(36 + Math.random() * 14);
-        setSpeed(newSpeed);
+    listenerRef.current = listener;
+    listener.subscribe();
 
-        const remainingStops = Math.max(
-          1,
-          (1 - nextIdx + routeWaypoints.length) % routeWaypoints.length,
-        );
-        setEtaMinutes(remainingStops * 3 + 1);
-        setDistanceKm(Number((remainingStops * 1.2).toFixed(1)));
+    return () => {
+      if (listenerRef.current) {
+        listenerRef.current.unsubscribe();
+        listenerRef.current = null;
+      }
+    };
+  }, [isClient, routeId]);
 
-        return nextIdx;
-      });
+  // 3. Fallback Route Preview Simulation (Active when no driver broadcast is currently publishing)
+  useEffect(() => {
+    if (!isSimulating || isLiveTelemetryActive || !mapInstanceRef.current || !busMarkerRef.current) return;
+
+    let index = 1;
+    const timer = setInterval(() => {
+      index = (index + 1) % routeWaypoints.length;
+      const targetPos = routeWaypoints[index];
+
+      if (busMarkerRef.current && targetPos) {
+        busMarkerRef.current.setLatLng(targetPos);
+      }
+
+      const simSpeed = Math.floor(36 + Math.random() * 12);
+      setSpeed(simSpeed);
+
+      const remainingStops = Math.max(
+        1,
+        (1 - index + routeWaypoints.length) % routeWaypoints.length,
+      );
+      setEtaMinutes(remainingStops * 3 + 1);
+      setDistanceKm(Number((remainingStops * 1.2).toFixed(1)));
     }, 4000);
 
     return () => clearInterval(timer);
-  }, [isSimulating]);
+  }, [isSimulating, isLiveTelemetryActive]);
 
   const recenterBus = () => {
     if (mapInstanceRef.current && busMarkerRef.current) {
@@ -268,7 +344,7 @@ export function StudentLiveMap({
 
   const recenterMyStop = () => {
     if (mapInstanceRef.current) {
-      mapInstanceRef.current.flyTo([33.6844, 73.0187], 16, { duration: 1.2 });
+      mapInstanceRef.current.flyTo(studentStopCoords, 16, { duration: 1.2 });
     }
   };
 
@@ -289,21 +365,27 @@ export function StudentLiveMap({
             <Bus className="h-5 w-5 text-[#0094DD]" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <h3 className="text-sm font-bold text-foreground">
-                Scheduled Route Itinerary & Waypoints
+                {routeName}
               </h3>
               <Badge
                 variant="outline"
-                className="bg-primary/10 text-primary border-primary/20 text-[10px] gap-1"
+                className={`text-[10px] gap-1 font-mono ${
+                  isLiveTelemetryActive
+                    ? "bg-emerald-500/15 text-emerald-600 border-emerald-500/30"
+                    : "bg-primary/10 text-primary border-primary/20"
+                }`}
               >
-                <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse"></span> Route
-                Preview
+                <span className={`h-1.5 w-1.5 rounded-full ${isLiveTelemetryActive ? "bg-emerald-500 animate-pulse" : "bg-primary"}`} />
+                {isLiveTelemetryActive ? "Live GPS Broadcast" : "Route Preview Flow"}
+              </Badge>
+              <Badge variant="outline" className="text-[10px] text-muted-foreground font-mono">
+                Channel: shift-route-{routeId}
               </Badge>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Route NUST-01 (Islamabad Sectors &rarr; NUST H-12 Campus) • Telemetry Architecture
-              Ready
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Pickup at: <strong className="text-foreground">{customStopName}</strong> ({customPickupTime}) • Supabase Realtime Broadcast Stream
             </p>
           </div>
         </div>
@@ -312,15 +394,15 @@ export function StudentLiveMap({
         <div className="flex items-center gap-4 text-xs">
           <div className="text-right">
             <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
-              Estimated Arrival at {customStopName}
+              Estimated Arrival at Your Stop
             </span>
-            <span className="font-bold text-[#E77A18] text-sm">
+            <span className="font-bold text-[#E77A18] text-sm font-mono">
               ~{etaMinutes} mins ({distanceKm} km)
             </span>
           </div>
           <div className="text-right pl-3 border-l border-border">
             <span className="text-muted-foreground block text-[10px] uppercase font-semibold">
-              Average Route Speed
+              Live Transit Speed
             </span>
             <span className="font-mono font-bold text-foreground text-sm">{speed} km/h</span>
           </div>
@@ -333,13 +415,13 @@ export function StudentLiveMap({
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900 z-10 gap-3">
             <Loader2 className="h-8 w-8 text-[#0094DD] animate-spin" />
             <p className="text-xs font-semibold text-muted-foreground">
-              Loading Scheduled Route Waypoints Map...
+              Initializing Leaflet.js Realtime Telemetry Map...
             </p>
           </div>
         )}
         <div ref={mapContainerRef} className="w-full h-full z-0" />
 
-        {/* Floating Quick Controls */}
+        {/* Floating Quick Navigation Controls */}
         {mapLoaded && (
           <div className="absolute top-3 left-3 z-10 flex flex-col gap-1.5 bg-background/90 backdrop-blur-md p-1.5 rounded-xl border border-border/80 shadow-md">
             <Button
@@ -347,16 +429,16 @@ export function StudentLiveMap({
               variant="ghost"
               onClick={recenterBus}
               className="h-8 px-2.5 text-xs font-semibold justify-start hover:bg-orange-500/10 hover:text-[#E77A18]"
-              title="Center on Vehicle Waypoint"
+              title="Track Vehicle Location"
             >
-              <Bus className="mr-1.5 h-3.5 w-3.5 text-[#E77A18]" /> Vehicle Flow
+              <Bus className="mr-1.5 h-3.5 w-3.5 text-[#E77A18]" /> Center Bus
             </Button>
             <Button
               size="sm"
               variant="ghost"
               onClick={recenterMyStop}
               className="h-8 px-2.5 text-xs font-semibold justify-start hover:bg-emerald-500/10 hover:text-emerald-600"
-              title="Center on My Stop"
+              title="Center on My Assigned Stop"
             >
               <MapPin className="mr-1.5 h-3.5 w-3.5 text-emerald-600" /> My Stop
             </Button>
@@ -365,25 +447,31 @@ export function StudentLiveMap({
               variant="ghost"
               onClick={resetView}
               className="h-8 px-2.5 text-xs justify-start text-muted-foreground hover:text-[#0094DD]"
-              title="Show Full Route"
+              title="Show Full Route Itinerary"
             >
               <RotateCcw className="mr-1.5 h-3.5 w-3.5" /> Full Route
             </Button>
           </div>
         )}
 
-        {/* Simulation Switcher Badge */}
+        {/* Realtime Stream Status Ribbon */}
         {mapLoaded && (
-          <div className="absolute bottom-3 left-3 z-10 bg-background/90 backdrop-blur-md px-3 py-1.5 rounded-full border border-border/80 shadow text-xs flex items-center gap-2">
-            <button
-              onClick={() => setIsSimulating(!isSimulating)}
-              className="flex items-center gap-1.5 text-[#0094DD] hover:underline font-semibold"
-            >
-              {isSimulating ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-              {isSimulating ? "Pause Route Preview" : "Resume Route Preview"}
-            </button>
-            <span className="text-[10px] text-muted-foreground">
-              • OpenStreetMap Leaflet Engine
+          <div className="absolute bottom-3 left-3 z-10 bg-background/95 backdrop-blur-md px-3.5 py-1.5 rounded-full border border-border/80 shadow-md text-xs flex items-center gap-2.5">
+            {isLiveTelemetryActive ? (
+              <span className="flex items-center gap-1.5 text-emerald-600 font-semibold">
+                <Radio className="h-3.5 w-3.5 animate-pulse text-emerald-500" /> Live GPS Stream Connected
+              </span>
+            ) : (
+              <button
+                onClick={() => setIsSimulating(!isSimulating)}
+                className="flex items-center gap-1.5 text-[#0094DD] hover:underline font-semibold"
+              >
+                {isSimulating ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                {isSimulating ? "Pause Route Preview" : "Resume Route Preview"}
+              </button>
+            )}
+            <span className="text-[10px] text-muted-foreground border-l border-border pl-2 font-mono">
+              Leaflet 1.9.4 • Supabase Realtime
             </span>
           </div>
         )}
@@ -394,14 +482,16 @@ export function StudentLiveMap({
         <div className="flex items-center gap-2 min-w-max">
           <Zap className="h-4 w-4 text-[#E77A18]" />
           <span>
-            <strong>Next Stop:</strong> {stops[busProgressIndex % stops.length]?.name} (
-            {stops[busProgressIndex % stops.length]?.time})
+            <strong>Assigned Pickup Stop:</strong> {customStopName} ({customPickupTime})
           </span>
         </div>
-        <div className="min-w-max ml-4">
+        <div className="min-w-max ml-4 flex items-center gap-3">
           <span>
-            Assigned Vehicle:{" "}
-            <strong className="text-foreground">UTS-CST-104 (Toyota Coaster AC)</strong>
+            Vehicle: <strong className="text-foreground">UTS-CST-104 (Toyota Coaster)</strong>
+          </span>
+          <span className="text-border">|</span>
+          <span>
+            Driver: <strong className="text-foreground">Muhammad Tariq</strong>
           </span>
         </div>
       </div>

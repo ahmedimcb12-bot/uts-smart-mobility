@@ -70,7 +70,7 @@ import type {
   FeePaymentStatus,
 } from "@/lib/transport-eligibility";
 import { OfflineAttendanceQueue, ATTENDANCE_EVENT_KEY } from "@/lib/offline-attendance-queue";
-import { toast } from "sonner";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -83,7 +83,11 @@ export const Route = createFileRoute("/admin")({
       },
     ],
   }),
-  component: AdminDashboardPage,
+  component: () => (
+    <ProtectedRoute allowedRoles={["ADMIN"]}>
+      <AdminDashboardPage />
+    </ProtectedRoute>
+  ),
 });
 
 function AdminDashboardPage() {
